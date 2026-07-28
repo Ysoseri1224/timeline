@@ -635,7 +635,7 @@ select:focus-visible {
   position: relative;
   z-index: 2;
   margin: 0;
-  padding: 42px 24px 170px;
+  padding: 42px 24px calc(170px + env(safe-area-inset-bottom, 0px));
   color: var(--ink-faint);
   font-family: 'Caveat', cursive;
   font-size: 17px;
@@ -807,7 +807,7 @@ select:focus-visible {
 .timeline-toolbar {
   position: fixed;
   z-index: 50;
-  bottom: 22px;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   display: flex;
   width: max-content;
@@ -833,8 +833,7 @@ select:focus-visible {
   display: none;
 }
 
-.timeline-toolbar:hover,
-.timeline-toolbar.is-dragging {
+.timeline-toolbar:hover {
   background: color-mix(in oklch, var(--paper) 94%, white 6%);
   box-shadow: 0 13px 34px rgba(52, 39, 24, 0.13);
 }
@@ -859,16 +858,6 @@ select:focus-visible {
 .timeline-toolbar select:hover {
   color: var(--ink);
   background: color-mix(in oklch, var(--ink) 5%, transparent);
-}
-
-.toolbar-grip {
-  touch-action: none;
-  cursor: grab !important;
-  letter-spacing: 0.12em;
-}
-
-.timeline-toolbar.is-dragging .toolbar-grip {
-  cursor: grabbing !important;
 }
 
 .filter-chips,
