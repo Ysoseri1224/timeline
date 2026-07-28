@@ -126,7 +126,7 @@ export default function TimelineApp() {
         const inkHue = rawInkHue > 360 ? rawInkHue - 360 : rawInkHue;
         root.style.setProperty('--paper', `oklch(${lightness.toFixed(4)} ${chroma.toFixed(4)} ${paperHue.toFixed(2)})`);
         root.style.setProperty('--ink', `oklch(${inkLightness.toFixed(4)} ${inkChroma.toFixed(4)} ${inkHue.toFixed(2)})`);
-        root.style.setProperty('--noise-opacity', String((0.025 + progress * 0.035).toFixed(4)));
+        root.style.setProperty('--noise-opacity', String((0.085 + progress * 0.035).toFixed(4)));
         root.style.setProperty('--age-progress', progress.toFixed(4));
       };
       setAge(0);
@@ -335,11 +335,16 @@ export default function TimelineApp() {
   return (
     <main ref={rootRef} className="timeline-page">
       <svg className="paper-noise" aria-hidden="true">
-        <filter id="paper-fibers">
-          <feTurbulence type="fractalNoise" baseFrequency="0.72 0.18" numOctaves="4" seed="17" stitchTiles="stitch" />
+        <filter id="paper-grain">
+          <feTurbulence type="fractalNoise" baseFrequency="0.78" numOctaves="5" seed="17" stitchTiles="stitch" />
           <feColorMatrix type="saturate" values="0" />
         </filter>
-        <rect width="100%" height="100%" filter="url(#paper-fibers)" />
+        <filter id="paper-fibers">
+          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.34" numOctaves="4" seed="41" stitchTiles="stitch" />
+          <feColorMatrix type="saturate" values="0" />
+        </filter>
+        <rect className="paper-noise__grain" width="100%" height="100%" filter="url(#paper-grain)" />
+        <rect className="paper-noise__fibers" width="100%" height="100%" filter="url(#paper-fibers)" />
       </svg>
 
       <a className="back-link" href="/" aria-label="返回 luckyrong">← <span>luckyrong</span></a>
