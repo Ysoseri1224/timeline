@@ -126,7 +126,7 @@ export default function TimelineApp() {
         const inkHue = rawInkHue > 360 ? rawInkHue - 360 : rawInkHue;
         root.style.setProperty('--paper', `oklch(${lightness.toFixed(4)} ${chroma.toFixed(4)} ${paperHue.toFixed(2)})`);
         root.style.setProperty('--ink', `oklch(${inkLightness.toFixed(4)} ${inkChroma.toFixed(4)} ${inkHue.toFixed(2)})`);
-        root.style.setProperty('--noise-opacity', String((0.085 + progress * 0.035).toFixed(4)));
+        root.style.setProperty('--noise-opacity', String((0.105 + progress * 0.04).toFixed(4)));
         root.style.setProperty('--age-progress', progress.toFixed(4));
       };
       setAge(0);

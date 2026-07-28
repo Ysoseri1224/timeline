@@ -15,7 +15,7 @@
   --ink: oklch(0.25 0.02 260);
   --ink-soft: color-mix(in oklch, var(--ink) 62%, var(--paper));
   --ink-faint: color-mix(in oklch, var(--ink) 34%, var(--paper));
-  --noise-opacity: 0.085;
+  --noise-opacity: 0.105;
   --paper-raised: color-mix(in oklch, var(--paper) 94%, white);
   --paper-shadow: rgba(54, 41, 26, 0.12);
   --premium-ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -84,11 +84,11 @@ select:focus-visible {
   inset: -10%;
   z-index: 0;
   background:
-    radial-gradient(circle, rgba(73, 54, 35, 0.17) 0 0.45px, transparent 0.8px) 0 0 / 5px 7px,
-    radial-gradient(circle, rgba(132, 101, 61, 0.12) 0 0.55px, transparent 1px) 2px 3px / 11px 13px,
-    repeating-linear-gradient(4deg, transparent 0 17px, rgba(102, 77, 48, 0.055) 17.5px, transparent 18.2px 35px),
-    repeating-linear-gradient(94deg, transparent 0 43px, rgba(255, 255, 255, 0.12) 43.5px, transparent 44px 83px);
-  opacity: calc(0.34 + var(--age-progress) * 0.1);
+    radial-gradient(circle, rgba(73, 54, 35, 0.2) 0 0.5px, transparent 0.86px) 0 0 / 5px 7px,
+    radial-gradient(circle, rgba(132, 101, 61, 0.145) 0 0.62px, transparent 1.08px) 2px 3px / 11px 13px,
+    repeating-linear-gradient(4deg, transparent 0 17px, rgba(102, 77, 48, 0.07) 17.5px, transparent 18.2px 35px),
+    repeating-linear-gradient(94deg, transparent 0 43px, rgba(255, 255, 255, 0.14) 43.5px, transparent 44px 83px);
+  opacity: calc(0.38 + var(--age-progress) * 0.11);
   mix-blend-mode: multiply;
   transform: rotate(-0.18deg);
   pointer-events: none;
@@ -102,18 +102,18 @@ select:focus-visible {
   height: 124%;
   opacity: var(--noise-opacity);
   mix-blend-mode: multiply;
-  filter: contrast(1.45);
+  filter: contrast(1.62);
   pointer-events: none;
 }
 
 .paper-noise__grain {
   fill: #6f5538;
-  opacity: 0.82;
+  opacity: 0.86;
 }
 
 .paper-noise__fibers {
   fill: #8b6a42;
-  opacity: 0.56;
+  opacity: 0.64;
 }
 
 .back-link {
