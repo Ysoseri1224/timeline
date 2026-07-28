@@ -1260,6 +1260,12 @@ select:focus-visible {
   transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms var(--premium-ease);
 }
 
+.axis-order-item:not(.is-primary) {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
 .axis-order-item:hover,
 .axis-order-item.is-active {
   color: var(--ink);
@@ -1278,6 +1284,7 @@ select:focus-visible {
   background: color-mix(in oklch, var(--paper) 86%, white);
   box-shadow: 0 7px 18px rgba(54, 41, 26, 0.12);
   transform: scale(1.018) rotate(-0.3deg);
+  cursor: grabbing;
 }
 
 .axis-select {
@@ -1290,6 +1297,10 @@ select:focus-visible {
   background: transparent;
   text-align: left;
   cursor: pointer;
+}
+
+.axis-order-item:not(.is-primary) .axis-select {
+  cursor: inherit;
 }
 
 .axis-swatch {

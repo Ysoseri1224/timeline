@@ -98,6 +98,14 @@ export default function EditPanel({
   const [localError, setLocalError] = useState('');
   const orderedAxesRef = useRef(orderedAxes);
   const dragStartOrderRef = useRef<TimelineAxis[]>(orderedAxes);
+  const dragSessionRef = useRef<{
+    axisId: number;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    started: boolean;
+  } | null>(null);
+  const suppressAxisSelectionRef = useRef<number | null>(null);
   const editingAxis = useMemo(() => axes.find((axis) => axis.id === editingAxisId) ?? null, [axes, editingAxisId]);
 
   useEffect(() => {
@@ -150,17 +158,38 @@ export default function EditPanel({
     }
   };
 
-  const beginAxisDrag = (pointerEvent: ReactPointerEvent<HTMLButtonElement>, axis: TimelineAxis) => {
-    if (axis.is_primary || busy || reorderBusy) return;
-    pointerEvent.preventDefault();
-    pointerEvent.currentTarget.focus();
-    pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId);
-    dragStartOrderRef.current = orderedAxesRef.current;
-    setDraggingAxisId(axis.id);
+  const selectAxis = (axisId: number) => {
+    if (suppressAxisSelectionRef.current === axisId) {
+      suppressAxisSelectionRef.current = null;
+      return;
+    }
+    setEditingAxisId(axisId);
   };
 
-  const moveDraggedAxis = (pointerEvent: ReactPointerEvent<HTMLButtonElement>, axisId: number) => {
-    if (draggingAxisId !== axisId) return;
+  const beginAxisDrag = (pointerEvent: ReactPointerEvent<HTMLDivElement>, axis: TimelineAxis) => {
+    if (axis.is_primary || busy || reorderBusy) return;
+    if (pointerEvent.pointerType === 'mouse' && pointerEvent.button !== 0) return;
+    pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId);
+    dragStartOrderRef.current = orderedAxesRef.current;
+    dragSessionRef.current = {
+      axisId: axis.id,
+      pointerId: pointerEvent.pointerId,
+      startX: pointerEvent.clientX,
+      startY: pointerEvent.clientY,
+      started: false,
+    };
+  };
+
+  const moveDraggedAxis = (pointerEvent: ReactPointerEvent<HTMLDivElement>, axisId: number) => {
+    const session = dragSessionRef.current;
+    if (!session || session.axisId !== axisId || session.pointerId !== pointerEvent.pointerId) return;
+    if (!session.started) {
+      const distance = Math.hypot(pointerEvent.clientX - session.startX, pointerEvent.clientY - session.startY);
+      if (distance < 6) return;
+      session.started = true;
+      setDraggingAxisId(axisId);
+    }
+    pointerEvent.preventDefault();
     const target = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)
       ?.closest<HTMLElement>('[data-axis-order-id]');
     const targetId = Number(target?.dataset.axisOrderId);
@@ -169,21 +198,34 @@ export default function EditPanel({
     applyAxisOrder(moveAxisAround(orderedAxesRef.current, axisId, targetId, placeAfter));
   };
 
-  const finishAxisDrag = (pointerEvent: ReactPointerEvent<HTMLButtonElement>, axisId: number) => {
-    if (draggingAxisId !== axisId) return;
+  const finishAxisDrag = (pointerEvent: ReactPointerEvent<HTMLDivElement>, axisId: number) => {
+    const session = dragSessionRef.current;
+    if (!session || session.axisId !== axisId || session.pointerId !== pointerEvent.pointerId) return;
     if (pointerEvent.currentTarget.hasPointerCapture(pointerEvent.pointerId)) {
       pointerEvent.currentTarget.releasePointerCapture(pointerEvent.pointerId);
     }
+    dragSessionRef.current = null;
+    if (!session.started) {
+      selectAxis(axisId);
+      return;
+    }
+    pointerEvent.preventDefault();
+    suppressAxisSelectionRef.current = axisId;
+    window.setTimeout(() => {
+      if (suppressAxisSelectionRef.current === axisId) suppressAxisSelectionRef.current = null;
+    }, 0);
     setDraggingAxisId(null);
     void commitAxisOrder(orderedAxesRef.current);
   };
 
-  const cancelAxisDrag = (pointerEvent: ReactPointerEvent<HTMLButtonElement>, axisId: number) => {
-    if (draggingAxisId !== axisId) return;
+  const cancelAxisDrag = (pointerEvent: ReactPointerEvent<HTMLDivElement>, axisId: number) => {
+    const session = dragSessionRef.current;
+    if (!session || session.axisId !== axisId || session.pointerId !== pointerEvent.pointerId) return;
     if (pointerEvent.currentTarget.hasPointerCapture(pointerEvent.pointerId)) {
       pointerEvent.currentTarget.releasePointerCapture(pointerEvent.pointerId);
     }
-    applyAxisOrder(dragStartOrderRef.current);
+    dragSessionRef.current = null;
+    if (session.started) applyAxisOrder(dragStartOrderRef.current);
     setDraggingAxisId(null);
   };
 
@@ -358,7 +400,7 @@ export default function EditPanel({
         ) : (
           <div className="axis-manager">
             <div className="axis-list" data-form-part>
-              <p className="axis-order-note">从上到下对应纸面从左到右；拖过“我们”即可换到主轴另一侧。</p>
+              <p className="axis-order-note">按住次轴任意位置拖动；从上到下对应纸面从左到右，拖过“我们”即可换边。</p>
               <div className="axis-order-list" role="list" aria-label="叙事轴画面顺序">
                 {orderedAxes.map((axis) => (
                   <div
@@ -367,8 +409,12 @@ export default function EditPanel({
                     data-axis-order-id={axis.id}
                     className={`axis-order-item${editingAxisId === axis.id ? ' is-active' : ''}${axis.is_primary ? ' is-primary' : ''}${draggingAxisId === axis.id ? ' is-dragging' : ''}`}
                     style={{ '--axis-color': axis.color } as React.CSSProperties}
+                    onPointerDown={(pointerEvent) => beginAxisDrag(pointerEvent, axis)}
+                    onPointerMove={(pointerEvent) => moveDraggedAxis(pointerEvent, axis.id)}
+                    onPointerUp={(pointerEvent) => finishAxisDrag(pointerEvent, axis.id)}
+                    onPointerCancel={(pointerEvent) => cancelAxisDrag(pointerEvent, axis.id)}
                   >
-                    <button type="button" className="axis-select" onClick={() => setEditingAxisId(axis.id)}>
+                    <button type="button" className="axis-select" onClick={() => selectAxis(axis.id)}>
                       <span className="axis-swatch" style={{ background: axis.color }} />
                       <strong>{axis.name}</strong>
                       <small>{axis.is_primary ? '主轴 · 固定居中' : axis.parent_axis_id ? '支线' : '叙事轴'}</small>
@@ -382,10 +428,6 @@ export default function EditPanel({
                         aria-label={`拖动“${axis.name}”调整画面顺序`}
                         title="拖动排序；也可用上下方向键"
                         disabled={busy || reorderBusy}
-                        onPointerDown={(pointerEvent) => beginAxisDrag(pointerEvent, axis)}
-                        onPointerMove={(pointerEvent) => moveDraggedAxis(pointerEvent, axis.id)}
-                        onPointerUp={(pointerEvent) => finishAxisDrag(pointerEvent, axis.id)}
-                        onPointerCancel={(pointerEvent) => cancelAxisDrag(pointerEvent, axis.id)}
                         onKeyDown={(keyboardEvent) => moveAxisWithKeyboard(keyboardEvent, axis)}
                       >
                         拖
