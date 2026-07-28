@@ -1,0 +1,331 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useGSAP } from '@gsap/react';
+import gsap from 'gsap';
+import type {
+  AxisDraft,
+  EventDraft,
+  TimelineAxis,
+  TimelineEvent,
+  TimelineMedia,
+} from './types';
+
+interface EditPanelProps {
+  kind: 'event' | 'axes';
+  event: TimelineEvent | null;
+  axes: TimelineAxis[];
+  busy: boolean;
+  onClose: () => void;
+  onSaveEvent: (draft: EventDraft, eventId: number | null) => Promise<void>;
+  onSaveAxis: (draft: AxisDraft, axisId: number | null) => Promise<void>;
+  onDeleteAxis: (axis: TimelineAxis) => Promise<void>;
+  onUpload: (file: File, onProgress: (progress: number) => void) => Promise<TimelineMedia>;
+}
+
+const today = (): string => {
+  const date = new Date();
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+};
+
+const emptyEvent = (): EventDraft => ({
+  type: 'text',
+  title: '',
+  subtitle: '',
+  description: '',
+  event_date: today(),
+  color: '',
+  media: [],
+  axis_ids: [],
+});
+
+const eventToDraft = (event: TimelineEvent): EventDraft => ({
+  type: event.type,
+  title: event.title,
+  subtitle: event.subtitle || '',
+  description: event.description || '',
+  event_date: event.event_date,
+  color: event.color || '',
+  media: event.media,
+  axis_ids: event.axis_ids,
+});
+
+const emptyAxis = (sortOrder: number): AxisDraft => ({
+  name: '',
+  color: '#9d6c7b',
+  sort_order: sortOrder,
+  parent_axis_id: null,
+  start_date: '',
+  end_date: '',
+  merge_axis_id: null,
+});
+
+const axisToDraft = (axis: TimelineAxis): AxisDraft => ({
+  name: axis.name,
+  color: axis.color,
+  sort_order: axis.sort_order,
+  parent_axis_id: axis.parent_axis_id,
+  start_date: axis.start_date || '',
+  end_date: axis.end_date || '',
+  merge_axis_id: axis.merge_axis_id,
+});
+
+export default function EditPanel({
+  kind,
+  event,
+  axes,
+  busy,
+  onClose,
+  onSaveEvent,
+  onSaveAxis,
+  onDeleteAxis,
+  onUpload,
+}: EditPanelProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [eventDraft, setEventDraft] = useState<EventDraft>(() => (event ? eventToDraft(event) : emptyEvent()));
+  const [editingAxisId, setEditingAxisId] = useState<number | null>(null);
+  const [axisDraft, setAxisDraft] = useState<AxisDraft>(() => emptyAxis(axes.length));
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [localError, setLocalError] = useState('');
+  const editingAxis = useMemo(() => axes.find((axis) => axis.id === editingAxisId) ?? null, [axes, editingAxisId]);
+
+  useEffect(() => {
+    setEventDraft(event ? eventToDraft(event) : emptyEvent());
+  }, [event]);
+
+  useEffect(() => {
+    setAxisDraft(editingAxis ? axisToDraft(editingAxis) : emptyAxis(axes.length));
+  }, [editingAxis, axes.length]);
+
+  useGSAP(() => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    gsap.timeline({ defaults: { ease: 'power2.out' } })
+      .fromTo('.edit-backdrop', { autoAlpha: 0 }, { autoAlpha: 1, duration: reduced ? 0.1 : 0.28 })
+      .fromTo('.edit-sheet', { autoAlpha: 0, x: reduced ? 0 : 28, scale: reduced ? 1 : 0.985 }, { autoAlpha: 1, x: 0, scale: 1, duration: reduced ? 0.14 : 0.46 }, 0.03)
+      .fromTo('.edit-sheet [data-form-part]', { autoAlpha: 0, y: reduced ? 0 : 8 }, { autoAlpha: 1, y: 0, duration: reduced ? 0.1 : 0.32, stagger: 0.035 }, 0.14);
+  }, { scope: rootRef });
+
+  const updateEvent = <K extends keyof EventDraft>(field: K, value: EventDraft[K]) => {
+    setEventDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const updateAxis = <K extends keyof AxisDraft>(field: K, value: AxisDraft[K]) => {
+    setAxisDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const uploadFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setLocalError('');
+    try {
+      const uploaded: TimelineMedia[] = [];
+      for (const file of Array.from(files)) {
+        setUploadProgress(0);
+        const media = await onUpload(file, setUploadProgress);
+        uploaded.push(media);
+      }
+      setEventDraft((current) => ({ ...current, media: [...current.media, ...uploaded] }));
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : '媒体上传失败');
+    } finally {
+      setUploadProgress(null);
+    }
+  };
+
+  const saveEvent = async () => {
+    setLocalError('');
+    if (!eventDraft.title.trim()) {
+      setLocalError('请写下标题');
+      return;
+    }
+    if (eventDraft.axis_ids.length === 0) {
+      setLocalError('至少选择一条轴');
+      return;
+    }
+    await onSaveEvent(
+      {
+        ...eventDraft,
+        title: eventDraft.title.trim(),
+        subtitle: eventDraft.subtitle.trim(),
+        description: eventDraft.description.trim(),
+        color: eventDraft.color.trim(),
+      },
+      event?.id ?? null,
+    );
+  };
+
+  const saveAxis = async () => {
+    setLocalError('');
+    if (!axisDraft.name.trim()) {
+      setLocalError('请为轴命名');
+      return;
+    }
+    if (axisDraft.parent_axis_id && axisDraft.parent_axis_id === editingAxisId) {
+      setLocalError('轴不能从自己分支');
+      return;
+    }
+    await onSaveAxis({ ...axisDraft, name: axisDraft.name.trim() }, editingAxisId);
+    setEditingAxisId(null);
+    setAxisDraft(emptyAxis(axes.length + 1));
+  };
+
+  return (
+    <div ref={rootRef} className="edit-backdrop" role="presentation" onMouseDown={(mouseEvent) => mouseEvent.target === mouseEvent.currentTarget && onClose()}>
+      <section className="edit-sheet" role="dialog" aria-modal="true" aria-label={kind === 'event' ? '编辑时间轴事件' : '管理叙事轴'}>
+        <header data-form-part>
+          <div>
+            <span>{kind === 'event' ? 'write on paper' : 'weave the lines'}</span>
+            <h2>{kind === 'event' ? (event ? '修改这一页' : '记下这一刻') : '管理叙事轴'}</h2>
+          </div>
+          <button type="button" className="detail-close" onClick={onClose} aria-label="关闭">×</button>
+        </header>
+
+        {kind === 'event' ? (
+          <form onSubmit={(formEvent) => { formEvent.preventDefault(); void saveEvent(); }}>
+            <div className="form-grid" data-form-part>
+              <label>
+                <span>类型</span>
+                <select value={eventDraft.type} onChange={(changeEvent) => updateEvent('type', changeEvent.target.value as EventDraft['type'])}>
+                  <option value="text">文字</option>
+                  <option value="photo">照片</option>
+                  <option value="video">视频</option>
+                  <option value="milestone">里程碑</option>
+                </select>
+              </label>
+              <label>
+                <span>日期</span>
+                <input type="date" required value={eventDraft.event_date} onChange={(changeEvent) => updateEvent('event_date', changeEvent.target.value)} />
+              </label>
+            </div>
+            <label data-form-part>
+              <span>标题</span>
+              <input maxLength={120} required value={eventDraft.title} onChange={(changeEvent) => updateEvent('title', changeEvent.target.value)} placeholder="这一页发生了什么" />
+            </label>
+            <label data-form-part>
+              <span>副标题 <small>里程碑最适合写一句</small></span>
+              <input maxLength={180} value={eventDraft.subtitle} onChange={(changeEvent) => updateEvent('subtitle', changeEvent.target.value)} placeholder="可留空" />
+            </label>
+            <label data-form-part>
+              <span>正文</span>
+              <textarea rows={7} maxLength={8000} value={eventDraft.description} onChange={(changeEvent) => updateEvent('description', changeEvent.target.value)} placeholder="像写日记一样，不必很完整。" />
+            </label>
+            <fieldset data-form-part>
+              <legend>挂在哪些轴上</legend>
+              <div className="axis-checks">
+                {axes.map((axis) => (
+                  <label key={axis.id} style={{ '--chip-color': axis.color } as React.CSSProperties}>
+                    <input
+                      type="checkbox"
+                      checked={eventDraft.axis_ids.includes(axis.id)}
+                      onChange={() => updateEvent(
+                        'axis_ids',
+                        eventDraft.axis_ids.includes(axis.id)
+                          ? eventDraft.axis_ids.filter((axisId) => axisId !== axis.id)
+                          : [...eventDraft.axis_ids, axis.id],
+                      )}
+                    />
+                    <span>{axis.name}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="form-grid" data-form-part>
+              <label>
+                <span>节点自定义颜色 <small>可留空</small></span>
+                <input type="color" value={eventDraft.color || '#9d6c7b'} onChange={(changeEvent) => updateEvent('color', changeEvent.target.value)} />
+              </label>
+              <label className="upload-label">
+                <span>照片 / MP4</span>
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/avif,video/mp4,video/webm" multiple onChange={(changeEvent) => { void uploadFiles(changeEvent.target.files); changeEvent.target.value = ''; }} />
+                <strong>{uploadProgress === null ? '选择文件' : `上传 ${Math.round(uploadProgress * 100)}%`}</strong>
+              </label>
+            </div>
+            {eventDraft.media.length > 0 && (
+              <div className="media-editor" data-form-part>
+                {eventDraft.media.map((media, index) => (
+                  <div key={media.key}>
+                    {media.type === 'image' ? <img src={media.url} alt="" /> : <video src={`${media.url}#t=0.1`} muted preload="metadata" />}
+                    <input
+                      value={media.caption}
+                      maxLength={180}
+                      placeholder="caption"
+                      onChange={(changeEvent) => updateEvent('media', eventDraft.media.map((item, mediaIndex) => mediaIndex === index ? { ...item, caption: changeEvent.target.value } : item))}
+                    />
+                    <button type="button" onClick={() => updateEvent('media', eventDraft.media.filter((_, mediaIndex) => mediaIndex !== index))}>移除</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {localError && <div className="form-error" role="alert" data-form-part>{localError}</div>}
+            <footer data-form-part>
+              <button type="button" className="paper-button" onClick={onClose}>取消</button>
+              <button type="submit" className="paper-button paper-button--primary" disabled={busy || uploadProgress !== null}>{busy ? '正在保存…' : '写到纸上'}</button>
+            </footer>
+          </form>
+        ) : (
+          <div className="axis-manager">
+            <div className="axis-list" data-form-part>
+              {axes.map((axis) => (
+                <button
+                  type="button"
+                  key={axis.id}
+                  className={editingAxisId === axis.id ? 'is-active' : ''}
+                  onClick={() => setEditingAxisId(axis.id)}
+                >
+                  <span style={{ background: axis.color }} />
+                  <strong>{axis.name}</strong>
+                  <small>{axis.parent_axis_id ? '支线' : '主轴'} · {axis.sort_order}</small>
+                </button>
+              ))}
+              <button type="button" className={editingAxisId === null ? 'is-active' : ''} onClick={() => setEditingAxisId(null)}>＋ 新建一条轴</button>
+            </div>
+            <form onSubmit={(formEvent) => { formEvent.preventDefault(); void saveAxis(); }}>
+              <label data-form-part>
+                <span>轴名称</span>
+                <input maxLength={40} required value={axisDraft.name} onChange={(changeEvent) => updateAxis('name', changeEvent.target.value)} />
+              </label>
+              <div className="form-grid" data-form-part>
+                <label>
+                  <span>蜡笔颜色</span>
+                  <input type="color" value={axisDraft.color} onChange={(changeEvent) => updateAxis('color', changeEvent.target.value)} />
+                </label>
+                <label>
+                  <span>排列顺序</span>
+                  <input type="number" min="0" max="99" value={axisDraft.sort_order} onChange={(changeEvent) => updateAxis('sort_order', Number(changeEvent.target.value))} />
+                </label>
+              </div>
+              <label data-form-part>
+                <span>从哪条轴分出</span>
+                <select value={axisDraft.parent_axis_id ?? ''} onChange={(changeEvent) => updateAxis('parent_axis_id', changeEvent.target.value ? Number(changeEvent.target.value) : null)}>
+                  <option value="">独立主轴</option>
+                  {axes.filter((axis) => axis.id !== editingAxisId).map((axis) => <option key={axis.id} value={axis.id}>{axis.name}</option>)}
+                </select>
+              </label>
+              <div className="form-grid" data-form-part>
+                <label>
+                  <span>出现日期</span>
+                  <input type="date" value={axisDraft.start_date} onChange={(changeEvent) => updateAxis('start_date', changeEvent.target.value)} />
+                </label>
+                <label>
+                  <span>结束日期</span>
+                  <input type="date" value={axisDraft.end_date} onChange={(changeEvent) => updateAxis('end_date', changeEvent.target.value)} />
+                </label>
+              </div>
+              <label data-form-part>
+                <span>结束后合流到</span>
+                <select value={axisDraft.merge_axis_id ?? ''} onChange={(changeEvent) => updateAxis('merge_axis_id', changeEvent.target.value ? Number(changeEvent.target.value) : null)}>
+                  <option value="">自然消失</option>
+                  {axes.filter((axis) => axis.id !== editingAxisId).map((axis) => <option key={axis.id} value={axis.id}>{axis.name}</option>)}
+                </select>
+              </label>
+              {localError && <div className="form-error" role="alert" data-form-part>{localError}</div>}
+              <footer data-form-part>
+                {editingAxis && <button type="button" className="paper-button paper-button--danger" disabled={busy} onClick={() => void onDeleteAxis(editingAxis)}>删除</button>}
+                <span />
+                <button type="submit" className="paper-button paper-button--primary" disabled={busy}>{busy ? '正在保存…' : editingAxis ? '保存轴' : '创建轴'}</button>
+              </footer>
+            </form>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}

@@ -1,0 +1,652 @@
+# Timeline 设计文档（PRD + SOP）
+
+> luckyrong.ysoseri.us/timeline — 恋爱时间轴
+> 最后更新：2026-07-28
+
+---
+
+## 一、产品定义
+
+### 1.1 定位
+
+一本正在书写的私密日记。不是展览的相册，不是产品 landing page。进来的人感受到的是时间在流动、故事在积累。
+
+核心体验：**向下滚动 = 翻旧日记**。页面顶部是今天，纸张洁白墨水新鲜；越往下滚，纸张泛黄、墨水氧化褪色——连续的、不被感知的老化。
+
+### 1.2 用户
+
+- 主要用户：她（laptop or iPhone 16）
+- 次要用户：我的朋友（桌面浏览器）
+- 编辑者：仅我自己
+
+### 1.3 访问模式
+
+- **公开可看**：无需登录即可浏览完整时间轴
+- **登录可编辑**：点击编辑按钮时触发密码验证，不阻塞浏览流程
+
+### 1.4 不做的事
+
+- 不做移动端响应式兼容
+- 不做 demo/MVP 再迭代——直接做成品
+- 不先砍功能再加回来
+
+---
+
+## 二、设计语言
+
+### 2.1 手工感原则
+
+| 维度 | 实现方式 | 不做 |
+|------|----------|------|
+| 纸张质感 | 米白底 + SVG feTurbulence 纤维感噪点 | 光滑纯色背景 |
+| 字体温度 | 衬线体（Instrument Serif）+ 手写体（Caveat） | UI 无衬线体 |
+| 线条不完美 | Rough.js 渲染，自带歪扭和颗粒断裂 | 完美直线/圆弧 |
+| 颜色 | 墨水色/蜡笔色，亮但不刺眼 | 饱和色/荧光色 |
+| 装饰 | 来自内容（照片边缘、日期戳、缩略图旋转） | UI 组件/图标装饰 |
+
+### 2.2 配色体系
+
+独立调性，不复用 homepage 或 luckyrong 主站色系。
+
+#### 纸张（背景）— 连续渐变
+
+| 位置 | 色值 | 感觉 |
+|------|------|------|
+| 顶部（最新） | `oklch(0.96 0.01 80)` | 奶油白，新纸 |
+| 底部（最旧） | `oklch(0.90 0.04 75)` | 旧纸黄，泛黄 |
+
+#### 墨水（正文）— 连续渐变，iron gall ink 氧化路径
+
+| 位置 | 色值 | 感觉 |
+|------|------|------|
+| 顶部（最新） | `oklch(0.25 0.02 260)` | 蓝黑，钢笔墨水刚干 |
+| 底部（最旧） | `oklch(0.32 0.03 55)` | 暖褐灰，氧化几年后 |
+
+**Hue 插值路径**（必须指定，不走默认短路径）：
+```
+260°(蓝黑) → 300°(紫灰) → 360°/0°(红褐) → 55°(暖棕)
+```
+经过红/橙方向，对应真实 iron gall ink 氧化色相演变。oklch 保证中间不出灰色/脏色。
+
+#### 噪点透明度 — 连续渐变
+
+| 位置 | opacity |
+|------|---------|
+| 顶部 | 0.025 |
+| 底部 | 0.06 |
+
+#### 其他颜色
+
+| 元素 | 色彩规则 |
+|------|----------|
+| 日期文字 | 比正文浅一档，偏暖灰（褪色墨水） |
+| 轴线蜡笔 | 亮但不刺眼，恒定不随滚动变化，支持自定义 |
+| 里程碑背景 | 所属轴蜡笔色 opacity 0.06~0.10 |
+| hover 状态 | 不变色，物理反馈（微抬 + 阴影加深） |
+
+### 2.3 字体
+
+| 用途 | 字体 | 来源 |
+|------|------|------|
+| 正文/标题 | Instrument Serif | 自托管 woff2（已有） |
+| 日期戳/caption/折叠标记 | Caveat | Google Fonts |
+| 中文 fallback | Noto Serif SC | Google Fonts |
+
+### 2.4 布局："满纸"而非"满屏"
+
+- 纸张纹理铺满整个视口，延伸到屏幕边缘之外（视觉上纸比屏幕大）
+- 内容区（轴线 + 节点）左右保留 **48~64px 呼吸边距**（笔记本页边空白）
+- 无可见容器边界、无卡片外框、无分割线
+- 内容直接"长在纸面上"
+
+---
+
+## 三、核心功能
+
+### 3.1 多轴并行
+
+多条竖向蜡笔线并行，每条轴代表一个叙事维度。
+
+#### 轴的分类
+
+融合"人轴"和"事轴"：
+- **人轴**：我们（共同）/ 我 / 她
+- **事轴**：旅行 / 里程碑 / 日常 / 异地 / ……
+
+两者可叠加。轴支持动态创建（命名 + 选色）。
+
+#### 轴间距
+
+`(视口宽度 - 左右边距) / 当前活跃轴数量`，自动分配。轴数变化时 GSAP 动画过渡。
+
+#### 轴的生命周期
+
+- 轴可以在某段时间出现/消失（如"异地"轴只在异地期间存在）
+- 沉默的轴（当前时间段无事件）变为虚线
+- 轴的出现/消失有 GSAP 动画过渡
+
+#### 分支与合流
+
+- 支线从主轴以贝塞尔曲线弯出
+- 支线比主轴细，颜色从主轴色派生（饱和度降低）
+- 结束时以贝塞尔曲线合回主轴或消失
+- 弧线是整个页面最有手工感的元素
+
+#### 交汇节点
+
+- 一个事件属于多条轴时，用弧线/连接线连接
+- 连接线颜色是两条轴颜色的混合
+
+### 3.2 节点
+
+#### 节点类型与默认展示
+
+| 类型 | 默认态 | 视觉感受 |
+|------|--------|----------|
+| 文字 | 日期（Caveat 手写体）+ 标题 + 描述前20字省略 | 日记里的短句 |
+| 照片 | 日期 + 标题 + 缩略图（64×64 圆角 cover，1-2° 随机旋转） | 贴在页边的拍立得 |
+| 视频 | 日期 + 标题 + 封面图缩略 + 播放三角图标 | 同照片但有播放暗示 |
+| 里程碑 | 全宽卡片 + 半透明色块背景 + 大标题 + 副标题 | 章节封面，默认展开 |
+
+#### 节点位置
+
+- 贴在轴线上，从轴侧边伸出
+- 属于某条轴的节点挂在该轴上
+
+#### 节点交互：3D 浮层
+
+点击节点 → 内容从纸面"浮起"：
+
+**初态**（压在纸里）：
+```css
+transform: translateZ(-20px) scale(0.97);
+opacity: 0;
+filter: blur(1px);
+```
+
+**激活态**（浮到纸面）：
+```css
+transform: translateZ(0) scale(1);
+opacity: 1;
+filter: blur(0);
+box-shadow: 0 8px 24px rgba(44,36,22,0.10);
+```
+
+规则：
+- 父容器 `perspective: 1000px`
+- 同时只有 1 个浮层激活（显存 < 2MB）
+- 浮层从节点位置展开，max-width 480px，不居中
+- 节点在右侧 → 浮层向左展开；反之亦然
+- 关闭时 GSAP `timeline.reverse()` 原路落回
+- `will-change` 仅动画期间添加，结束后移除
+- 背景轻微模糊（`backdrop-filter: blur(3px)`，蒙层上）
+
+#### 展开后内容排版
+
+**文字节点**：
+- 标题：Instrument Serif
+- 日期：Caveat 手写体小字，颜色浅一档
+- 正文：Instrument Serif 15-16px，行高 1.8
+- 底部：tag chips（所属轴标识）
+
+**照片节点**：
+- 照片占浮层主体（宽度 100%，max-height 约束）
+- 多张照片横向排列，可左右滑动或 grid
+- 点击单张 → GLightbox 全屏
+- 照片下方可选 caption（Caveat 手写体）
+
+**视频节点**：
+- 展开后内嵌 `<video>` 播放器
+- 不自动播放，点击播放
+- R2 存 mp4 → 原生 `<video>`
+
+**里程碑节点**：
+- 不需点击展开——默认全宽展开
+- 大标题居中 + 副标题/日期
+- 背景：所属轴蜡笔色 opacity 0.06~0.10
+- 在视觉上把时间轴分成"章"
+
+### 3.3 时间折叠
+
+**全局双模式切换**，阈值 3 个月。
+
+| 模式 | 行为 | 适合 |
+|------|------|------|
+| 📖 紧凑模式（默认） | 所有节点等间距排列，>3个月空白折叠为 "· · · N 个月 · · ·"（Caveat 手写体） | 阅读内容 |
+| 📐 时间轴模式 | 恢复真实时间比例，空白完整展示，轴线贯穿 | 感受时间跨度 |
+
+- 切换控件在工具托盘中
+- 切换时 GSAP 驱动所有节点位置重排动画（平滑，不瞬切）
+- 折叠标记（"· · · N 个月 · · ·"）只在紧凑模式显示
+
+### 3.4 标签筛选
+
+工具托盘中的筛选 chips：
+- 按轴筛选（只看"旅行"轴）
+- 按人筛选（只看"我们"的事件）
+- 支持多选（并集激活）
+- 筛选时：匹配轴高亮，非匹配轴 fadeOut 变虚线（GSAP 编排）
+- 默认进入页面时无筛选（全部显示）
+
+### 3.5 年份导航
+
+右侧浮动年份锚点：
+- 竖排小字，细小安静
+- 点击跳转到对应时间段
+
+### 3.6 编辑功能
+
+**页面内 inline 编辑，非独立后台。**
+
+- 登录态后轴上出现"+"按钮，节点出现编辑/删除按钮
+- 新增：选择轴（可多选 = 跨轴）+ 填标题/日期/描述 + 拖拽上传媒体
+- 编辑：原地弹出浮层修改
+- 新建轴：命名 + 选颜色
+- 未登录时纯展示，编辑控件不渲染
+
+---
+
+## 四、导航：浮动工具托盘
+
+### 4.1 结构
+
+| 位置 | 元素 |
+|------|------|
+| 左上角落 | 返回按钮（← luckyrong），小且安静 |
+| 底部居中浮动 | 工具托盘（主交互入口） |
+| 右侧浮动 | 年份锚点（竖排） |
+
+### 4.2 工具托盘内容
+
+半透明毛玻璃圆角条，包含：
+- 筛选 chips
+- 📖/📐 模式切换
+- 年份快跳下拉
+- 登录后追加："+"新建节点
+
+### 4.3 交互行为
+
+- 平时半透明安静待命，hover 时完全不透明
+- **可拖动**：拖拽改变位置，防止遮盖内容，记住位置（localStorage）
+- 独立于 luckyrong 主站导航
+
+---
+
+## 五、色温漂移系统（SOP）
+
+### 5.1 驱动方式
+
+GSAP ScrollTrigger，`scrub: true`（硬跟手，1:1 同步）。
+
+### 5.2 变化维度
+
+| 维度 | 顶部值（最新） | 底部值（最旧） | 插值方式 |
+|------|----------------|----------------|----------|
+| 背景色 | `oklch(0.96 0.01 80)` | `oklch(0.90 0.04 75)` | oklch 线性 |
+| 墨水色 | `oklch(0.25 0.02 260)` | `oklch(0.32 0.03 55)` | oklch longer hue path |
+| 噪点 opacity | 0.025 | 0.06 | 线性 |
+
+### 5.3 Hue 插值路径
+
+墨水色的 hue 从 260° 到 55°，必须走 longer path（经 300° → 0° → 55°），不走 shorter path（会经过绿色区域）。
+
+实现方式：GSAP 不原生支持 oklch hue direction，需要拆成多段 keyframes 或用自定义 onUpdate 回调手动计算中间色。
+
+```js
+// 方案：用 onUpdate 手动插值
+gsap.to({ progress: 0 }, {
+  progress: 1,
+  ease: 'none',
+  scrollTrigger: { ... scrub: true },
+  onUpdate: function() {
+    const p = this.targets()[0].progress;
+    // 手动计算 hue: 260 → 300 → 360 → 55 (总跨度 155°)
+    const hue = 260 + p * 155; // 简化版，实际需处理 360° 回绕
+    const adjustedHue = hue > 360 ? hue - 360 : hue;
+    root.style.setProperty('--ink', `oklch(${lerp(0.25, 0.32, p)} ${lerp(0.02, 0.03, p)} ${adjustedHue})`);
+  }
+});
+```
+
+### 5.4 纸张纹理
+
+SVG feTurbulence 噪点层，固定叠加在背景上，opacity 随滚动连续变化（0.025 → 0.06）。
+
+---
+
+## 六、轴线渲染系统（SOP）
+
+### 6.1 技术串联
+
+```
+d3-shape（路径数学计算）
+    ↓ 输出 SVG path d 属性
+Rough.js（手绘化渲染）
+    ↓ 输出带歪扭/颗粒感的 SVG elements
+React（状态管理 + DOM 渲染）
+    ↓ 管理筛选、hover、active、动画触发
+GSAP（动画编排）
+    ↓ 轴线生长、筛选切换、模式切换
+```
+
+### 6.2 Rough.js 参数
+
+| 参数 | 值 | 效果 |
+|------|-----|------|
+| roughness | 1.5~2.5 | 蜡笔粗糙程度 |
+| bowing | 1~2 | 线条自然弯曲 |
+| strokeWidth | 3~4 | 蜡笔粗细 |
+| stroke | 轴自定义颜色 | 蜡笔色，亮但不刺眼 |
+
+### 6.3 分支贝塞尔计算
+
+使用 d3-shape 的 `curveBumpY` 生成平滑 S 形分叉：
+
+```js
+import { line, curveBumpY } from 'd3-shape';
+
+const branchCurve = line()
+  .x(d => d.x)
+  .y(d => d.y)
+  .curve(curveBumpY);
+
+const pathD = branchCurve([
+  { x: mainAxisX, y: splitY },
+  { x: branchAxisX, y: splitY + 60 }
+]);
+// 将 pathD 交给 Rough.js 渲染为手绘风格
+```
+
+### 6.4 轴线生长动画
+
+首次加载时轴线从上往下"画出来"：
+- Rough.js 输出多段 path
+- 对每段 path 设置 `stroke-dasharray` = 总长度，`stroke-dashoffset` = 总长度
+- GSAP stagger 动画递减 dashoffset → 0（线条逐渐显现）
+
+---
+
+## 七、动画系统（SOP）
+
+### 7.1 GSAP 作为唯一动画引擎
+
+GSAP v3.15.0 + ScrollTrigger + Timeline。GSAP skills 已安装（8 个 skill 文件）。
+
+纯 CSS transition 仅用于极简场景（如 hover opacity 变化），其余一律 GSAP。
+
+### 7.2 动画清单
+
+| # | 动画 | GSAP 工具 | 触发条件 |
+|---|------|-----------|----------|
+| 1 | 色温漂移 | ScrollTrigger scrub:true | 滚动 |
+| 2 | 节点入场 | ScrollTrigger + stagger | 节点进入视口 |
+| 3 | 浮层展开 | Timeline | 点击节点 |
+| 4 | 浮层收起 | timeline.reverse() | 点击关闭/背景 |
+| 5 | 轴线生长 | stagger + stroke-dashoffset | 首次加载 |
+| 6 | 里程碑展开 | Timeline（横向扩展 + 淡入） | 滚动到里程碑 |
+| 7 | 筛选切换 | fadeOut/fadeIn 编排 | 点击筛选 chip |
+| 8 | 模式切换 | 节点位置重排 | 点击模式 toggle |
+| 9 | 轴出现/消失 | width/opacity 过渡 | 时间段变化 |
+
+### 7.3 hover 交互
+
+不变色，物理反馈：
+```js
+// 节点 hover
+gsap.to(node, { scale: 1.01, boxShadow: '0 4px 12px rgba(44,36,22,0.08)', duration: 0.2 });
+// 或纯 CSS transition（足够简单，不必引入 GSAP）
+```
+
+---
+
+## 八、数据方案
+
+### 8.1 存储架构
+
+| 层 | 技术 | 存什么 |
+|----|------|--------|
+| 元数据 | Cloudflare D1 | 轴定义、事件信息、关联关系 |
+| 媒体文件 | Cloudflare R2 | 图片、视频原文件 |
+| API | luckyrong-router Worker | CRUD + 上传 + 认证 |
+
+### 8.2 数据库 Schema
+
+```sql
+CREATE TABLE timeline_axes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL,
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE timeline_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL CHECK(type IN ('text','photo','video','milestone')),
+  title TEXT NOT NULL,
+  description TEXT,
+  event_date TEXT NOT NULL,
+  media TEXT,  -- JSON: [{url, type, caption}]
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE timeline_event_axes (
+  event_id INTEGER NOT NULL REFERENCES timeline_events(id) ON DELETE CASCADE,
+  axis_id INTEGER NOT NULL REFERENCES timeline_axes(id) ON DELETE CASCADE,
+  PRIMARY KEY (event_id, axis_id)
+);
+```
+
+### 8.3 API 路由
+
+| 方法 | 路由 | 说明 | 认证 |
+|------|------|------|------|
+| GET | /timeline/api/axes | 获取所有轴 | 无 |
+| POST | /timeline/api/axes | 新建轴 | JWT |
+| PUT | /timeline/api/axes/:id | 编辑轴 | JWT |
+| DELETE | /timeline/api/axes/:id | 删除轴 | JWT |
+| GET | /timeline/api/events | 获取事件（分页，按日期倒序） | 无 |
+| POST | /timeline/api/events | 新增事件 | JWT |
+| PUT | /timeline/api/events/:id | 编辑事件 | JWT |
+| DELETE | /timeline/api/events/:id | 删除事件 | JWT |
+| POST | /timeline/api/upload | 上传媒体到 R2 | JWT |
+| POST | /timeline/api/login | 验证密码，签发 JWT | 无 |
+
+### 8.4 认证流程
+
+```
+用户点击编辑按钮
+  → 检查 localStorage 中是否有有效 JWT
+    → 有 → 直接进入编辑模式
+    → 无 → 弹出密码输入框
+      → 输入密码 → POST /timeline/api/login
+        → Worker 比对 env.TIMELINE_SECRET
+          → 通过 → 签 JWT（30天有效）→ 返回前端存 localStorage
+          → 失败 → 提示错误
+```
+
+---
+
+## 九、技术栈
+
+| 层 | 方案 | 版本/体积 |
+|----|------|-----------|
+| 框架 | Astro + React island（`client:visible`） | Astro 5 |
+| 动画 | GSAP + ScrollTrigger + Timeline | v3.15.0 |
+| 轴线渲染 | Rough.js | <9KB |
+| 路径计算 | d3-shape / d3-path | ~5KB |
+| 照片 lightbox | GLightbox | ~6KB |
+| 手写字体 | Caveat | Google Fonts |
+| 衬线字体 | Instrument Serif | 自托管 woff2 |
+| 后端 | Cloudflare Worker（luckyrong-router） | — |
+| 数据库 | Cloudflare D1 | — |
+| 媒体存储 | Cloudflare R2 | — |
+| 部署 | CF Pages（luckyrong 项目 /timeline 路由） | — |
+
+---
+
+## 十、文件结构（预期）
+
+```
+luckyrong/
+├── src/
+│   ├── pages/
+│   │   └── timeline.astro          # 页面入口，加载 React island
+│   ├── components/
+│   │   └── timeline/
+│   │       ├── TimelineApp.tsx      # React island 根组件
+│   │       ├── AxisRenderer.tsx     # 轴线渲染（Rough.js + d3）
+│   │       ├── NodeCard.tsx         # 节点卡片（文字/照片/视频）
+│   │       ├── Milestone.tsx        # 里程碑全宽组件
+│   │       ├── NodeDetail.tsx       # 节点浮层（3D 展开）
+│   │       ├── Toolbar.tsx          # 浮动工具托盘
+│   │       ├── YearNav.tsx          # 年份锚点
+│   │       ├── FilterChips.tsx      # 筛选 chips
+│   │       ├── EditPanel.tsx        # 编辑浮层（登录态）
+│   │       └── LoginPrompt.tsx      # 密码输入框
+│   └── styles/
+│       └── timeline.css             # timeline 独立样式（色温变量、纸张纹理）
+├── public/
+│   └── fonts/                       # 已有 Instrument Serif woff2
+└── package.json                     # gsap, roughjs, d3-shape, glightbox
+```
+
+---
+
+## 十一、实施规则
+
+### 11.1 质量标准
+
+- 直接做成品，不做 demo/prototype
+- 不先砍功能再加回来
+- 颜色支持自定义指定（轴颜色、节点颜色等）
+- GSAP 应用尽用，在最擅长/最好看的地方用
+- 所有技术决策以最终视觉/交互质量为导向
+
+### 11.2 性能约束
+
+- 同时只有 1 个浮层激活（GPU 合成层 < 2MB）
+- `will-change` 仅动画期间添加
+- 兼容集显轻薄本（Intel Iris Xe 级别）
+- 目标 FPS：桌面 60fps，iPhone 16 60fps
+
+### 11.3 兼容性
+
+- 桌面：Chrome/Edge/Safari 最新版
+- 移动：iPhone 16 Safari（仅浏览，不做响应式布局）
+- 不兼容：老版本浏览器、Android、低端设备
+
+---
+
+## 十二、Skills 工作流（SOP）
+
+### 12.1 已安装 Skills 清单
+
+| 类别 | Skill 名称 | 用途 |
+|------|-----------|------|
+| 动画引擎 | gsap-core, gsap-react, gsap-scrolltrigger, gsap-timeline, gsap-plugins, gsap-frameworks, gsap-performance, gsap-utils | GSAP 技术参考，写动画代码时自动查阅 |
+| 动效设计 | motion-design | 动效原则：timing/easing/choreography/Disney 原则/情绪映射 |
+| 设计工程 | emil-design-eng | Emil Kowalski 的设计工程标准 |
+| 动画审计 | review-animations | 审计已有动画的质量（easing、duration、性能） |
+| 动画改进 | improve-animations | 生成动画改进计划（含 AUDIT.md + PLAN-TEMPLATE.md） |
+| 动画发现 | find-animation-opportunities | 扫描代码，发现应该加动画但没加的地方 |
+| 动画词汇 | animation-vocabulary | 动画命名和描述的统一术语 |
+| 原型变体 | prototype | 对 UI 细节出 3-5 个方向变体，picker 切换对比 |
+| 视觉设计 | claude-design | HTML 高保真视觉设计（含引导式问答 + 方向建议） |
+| UI 库选型 | pick-ui-library | 根据需求推荐 UI 组件库 |
+| Apple 设计 | apple-design | Apple HIG 设计参考 |
+
+### 12.2 实现阶段：参考流程
+
+写每个组件的动画代码时，按以下顺序利用 skills：
+
+1. **确定情绪意图** — 查阅 `motion-design` 的 emotion-mapping（情绪 → 动效参数表）
+2. **选择 Motion Personality** — 本项目选 **Premium**（elegant, minimal, sophisticated）：
+   - Duration: 350-600ms
+   - Easing: `cubic-bezier(0.4, 0, 0.2, 1)`
+   - Overshoot: 0%
+3. **查参数** — `motion-design` 的 duration table + easing selection 确定具体值
+4. **写代码** — 参考 `gsap-*` skills 的最佳实践（useGSAP hook、ScrollTrigger 配置、Timeline 编排、性能优化）
+5. **三层检查** — 每个动画必须有 primary + secondary + ambient 三层（`motion-design` core philosophy）
+
+### 12.3 审计阶段：质量把控
+
+每完成一个功能模块（如轴线渲染、节点浮层、色温系统），运行审计：
+
+#### 步骤 1：review-animations
+
+审计已写动画的技术质量：
+- easing 方向是否正确（entrance = ease-out, exit = ease-in）
+- duration 是否匹配元素类型（参考 duration table）
+- 是否只动 `transform` + `opacity`（GPU 合成友好）
+- `will-change` 是否仅动画期间添加
+- reduced-motion 是否处理
+
+#### 步骤 2：improve-animations
+
+对 review 发现的问题生成改进计划：
+- 输出 AUDIT.md（问题清单 + 严重度）
+- 输出 PLAN（具体修改方案 + 代码片段）
+
+#### 步骤 3：find-animation-opportunities
+
+扫描完成的页面，检查遗漏：
+- 有没有应该加动画但没加的交互（feedback gaps、teleporting state）
+- 输出机会表（location / purpose / frequency / suggested motion）
+- 同时输出 rejected candidates（说明为什么不加）— 防止过度动画
+
+### 12.4 讨论阶段：设计决策
+
+遇到 UI 细节拿不定主意时（某个组件的视觉/交互方案），使用：
+
+#### prototype（变体对比）
+
+适用场景：
+- 节点卡片的展开动画风格（从下浮入 vs 从中心放大 vs 从轴线方向滑入）
+- 工具托盘的毛玻璃效果（轻薄 vs 浓厚 vs 有色调偏移）
+- 里程碑的视觉呈现（全宽色块 vs 内嵌装饰 vs 分割线强调）
+
+流程：
+1. 描述要探索的 UI 部件
+2. 自动生成 3 个方向各异的变体（非微调，是真正不同的设计方向）
+3. 通过 picker 在浏览器中实时切换对比
+4. 选定后集成到项目，删除原型文件
+
+#### claude-design（视觉探索）
+
+适用场景：
+- 页面整体调性验证（纸张质感 + 墨水色 + 布局的组合效果）
+- 工具托盘的完整视觉设计
+- 某个状态页面的视觉方案（空状态、加载态、错误态）
+
+流程：
+1. 描述需求 → skill 会问 8-10 个聚焦问题（输出格式、保真度、变体数量、调性）
+2. 如果方向太模糊，自动进入 Design Direction Advisor 模式（从 10 种设计哲学中选 3 个方向展示）
+3. 选定方向后输出 HTML 高保真原型
+4. 迭代微调直到满意
+
+### 12.5 Brand Motion Identity（本项目）
+
+根据 `motion-design` 的 Brand Motion Identity 框架，本项目定义：
+
+| 常量 | 值 | 依据 |
+|------|-----|------|
+| Signature easing | `cubic-bezier(0.4, 0, 0.2, 1)` | Premium archetype，优雅不急促 |
+| Duration palette | quick: 200ms / standard: 400ms / slow: 600ms | Premium 范围 350-600ms |
+| Entrance pattern | translateY(20px) + opacity:0 → settled，ease-out | 纸面浮现的统一方式 |
+
+**例外**：
+- ScrollTrigger scrub 动画不受 duration 限制（由滚动速度决定）
+- hover 反馈用 quick (200ms) 而非 standard
+- 轴线生长用 slow (600ms) + stagger
+
+---
+
+## 十三、待确认项
+
+- [ ] R2 bucket 名称
+- [ ] 轴的初始分类和命名（我们/我/她 之外的事轴具体有哪些）
+- [ ] 轴颜色具体值（实现时看整体效果确定）
+- [ ] 里程碑节点的具体视觉样式微调
+- [ ] 托盘工具栏的精确视觉设计（圆角大小、毛玻璃参数）

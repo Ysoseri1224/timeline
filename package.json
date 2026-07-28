@@ -1,0 +1,33 @@
+{
+  "name": "timeline",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro check && astro build",
+    "preview": "astro preview",
+    "check": "astro check && tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astrojs/react": "4.4.2",
+    "@gsap/react": "2.1.2",
+    "astro": "5.18.2",
+    "d3-shape": "3.2.0",
+    "glightbox": "3.3.1",
+    "gsap": "3.15.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "roughjs": "4.6.6"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.6",
+    "@types/d3-shape": "3.1.7",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4",
+    "wrangler": "4.114.0"
+  }
+}
