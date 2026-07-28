@@ -110,7 +110,8 @@ export function computeTimelineLayout(
       : activeAxes.find((axis) => event.axis_ids.includes(axis.id))?.id ?? null;
     const x = primaryAxisId ? (axisX.get(primaryAxisId) ?? STAGE_WIDTH / 2) : STAGE_WIDTH / 2;
     const isPrimaryEvent = primaryAxisId === primaryAxis?.id;
-    const side = isPrimaryEvent
+    const alternatesAroundPrimary = isPrimaryEvent && event.type !== 'milestone';
+    const side = alternatesAroundPrimary
       ? primaryEventIndex % 2 === 0 ? 'right' : 'left'
       : x <= STAGE_WIDTH / 2 ? 'right' : 'left';
     positioned.push({
@@ -120,7 +121,7 @@ export function computeTimelineLayout(
       side,
       primaryAxisId,
     });
-    if (isPrimaryEvent) primaryEventIndex += 1;
+    if (alternatesAroundPrimary) primaryEventIndex += 1;
   });
 
   const years: TimelineLayout['years'] = [];

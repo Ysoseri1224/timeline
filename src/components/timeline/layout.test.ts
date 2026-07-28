@@ -105,7 +105,7 @@ describe('timeline layout', () => {
     expect(layout.events.map((event) => event.side)).toEqual(['right', 'left', 'right', 'left']);
   });
 
-  it('次轴事件不占用主轴的左右交替序号', () => {
+  it('次轴事件和全宽里程碑不占用主轴侧挂节点的交替序号', () => {
     const secondary: TimelineAxis = { ...axes[0]!, id: 2, name: '旅行', sort_order: 0, is_primary: false };
     const primary: TimelineAxis = { ...axes[0]!, sort_order: 1 };
     const layout = computeTimelineLayout(
@@ -113,12 +113,16 @@ describe('timeline layout', () => {
       [
         { ...events[0]!, id: 9, event_date: '2026-07-01', axis_ids: [1] },
         { ...events[0]!, id: 8, event_date: '2026-06-01', axis_ids: [2] },
-        { ...events[0]!, id: 7, event_date: '2026-05-01', axis_ids: [1] },
+        { ...events[0]!, id: 7, type: 'milestone', event_date: '2026-05-01', axis_ids: [1] },
+        { ...events[0]!, id: 6, event_date: '2026-04-01', axis_ids: [1] },
       ],
       'compact',
     );
 
-    expect(layout.events.filter((event) => event.primaryAxisId === 1).map((event) => event.side)).toEqual(['right', 'left']);
+    expect(layout.events
+      .filter((event) => event.primaryAxisId === 1 && event.type !== 'milestone')
+      .map((event) => event.side))
+      .toEqual(['right', 'left']);
   });
 
   it('没有事件挂载时仍保留主轴', () => {
