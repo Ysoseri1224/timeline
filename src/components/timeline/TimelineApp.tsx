@@ -18,6 +18,7 @@ import {
   fetchAllEvents,
   fetchAxes,
   login,
+  reorderAxes as persistAxisOrder,
   storeToken,
   updateAxis,
   updateEvent,
@@ -293,6 +294,20 @@ export default function TimelineApp() {
     }
   };
 
+  const saveAxisOrder = async (axisIds: number[]) => {
+    setSaving(true);
+    try {
+      const response = await persistAxisOrder(axisIds);
+      setAxes(response.axes);
+      showToast('线条顺序已经整理好');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '轴顺序保存失败', 'error');
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const removeAxis = async (axis: TimelineAxis) => {
     if (!window.confirm(`删除“${axis.name}”？已挂载事件的轴不能直接删除。`)) return;
     setSaving(true);
@@ -451,6 +466,7 @@ export default function TimelineApp() {
           onClose={() => setEditPanel(null)}
           onSaveEvent={saveEvent}
           onSaveAxis={saveAxis}
+          onReorderAxes={saveAxisOrder}
           onDeleteAxis={removeAxis}
           onUpload={(file: File, onProgress: (progress: number) => void): Promise<TimelineMedia> => uploadMedia(file, onProgress)}
         />

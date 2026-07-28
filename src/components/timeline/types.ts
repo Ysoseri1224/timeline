@@ -6,6 +6,7 @@ export interface TimelineAxis {
   name: string;
   color: string;
   sort_order: number;
+  is_primary: boolean;
   parent_axis_id: number | null;
   start_date: string | null;
   end_date: string | null;

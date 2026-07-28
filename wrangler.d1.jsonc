@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "timeline-database",
+  "compatibility_date": "2026-07-29",
+  "d1_databases": [
+    {
+      "binding": "TIMELINE_DB",
+      "database_name": "timeline",
+      "database_id": "5c8f922d-a683-4888-b1a6-21a8603b111c",
+      "migrations_dir": "./migrations"
+    }
+  ]
+}

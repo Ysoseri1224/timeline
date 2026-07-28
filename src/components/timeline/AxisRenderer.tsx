@@ -66,6 +66,7 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
         const x = layout.axisX.get(axis.id);
         if (x === undefined) return;
         const filteredOut = filters.size > 0 && !filters.has(axis.id);
+        const primary = axis.is_primary;
         const startY = axis.start_date ? yForDate(layout, axis.start_date) : layout.top - 30;
         const endY = axis.end_date ? yForDate(layout, axis.end_date) : layout.bottom;
         const axisEvents = events
@@ -93,8 +94,9 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
             axis.id * 101 + index + 1,
             {
               dashed: filteredOut || silent,
-              opacity: filteredOut ? 0.2 : silent ? 0.52 : 0.9,
-              width: filteredOut ? 2.4 : 3.6,
+              opacity: filteredOut ? 0.2 : silent ? (primary ? 0.62 : 0.52) : (primary ? 0.96 : 0.9),
+              width: filteredOut ? (primary ? 3.2 : 2.4) : (primary ? 5.2 : 3.6),
+              roughness: primary ? 2.15 : 2,
             },
           );
         }
@@ -194,10 +196,10 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
           return (
             <span
               key={axis.id}
-              className={`axis-label${filteredOut ? ' is-muted' : ''}`}
+              className={`axis-label${axis.is_primary ? ' is-primary' : ''}${filteredOut ? ' is-muted' : ''}`}
               style={{ left: `${(x / layout.width) * 100}%`, '--axis-color': axis.color } as React.CSSProperties}
             >
-              {axis.name}
+              {axis.name}{axis.is_primary && <small>主轴</small>}
             </span>
           );
         })}

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
+import { moveAxisAround, moveAxisBy, sortAxes } from './axisOrder';
 import type {
   AxisDraft,
   EventDraft,
@@ -17,6 +19,7 @@ interface EditPanelProps {
   onClose: () => void;
   onSaveEvent: (draft: EventDraft, eventId: number | null) => Promise<void>;
   onSaveAxis: (draft: AxisDraft, axisId: number | null) => Promise<void>;
+  onReorderAxes: (axisIds: number[]) => Promise<void>;
   onDeleteAxis: (axis: TimelineAxis) => Promise<void>;
   onUpload: (file: File, onProgress: (progress: number) => void) => Promise<TimelineMedia>;
 }
@@ -27,16 +30,19 @@ const today = (): string => {
   return local.toISOString().slice(0, 10);
 };
 
-const emptyEvent = (): EventDraft => ({
-  type: 'text',
-  title: '',
-  subtitle: '',
-  description: '',
-  event_date: today(),
-  color: '',
-  media: [],
-  axis_ids: [],
-});
+const emptyEvent = (axes: TimelineAxis[]): EventDraft => {
+  const primaryAxis = axes.find((axis) => axis.is_primary);
+  return {
+    type: 'text',
+    title: '',
+    subtitle: '',
+    description: '',
+    event_date: today(),
+    color: '',
+    media: [],
+    axis_ids: primaryAxis ? [primaryAxis.id] : [],
+  };
+};
 
 const eventToDraft = (event: TimelineEvent): EventDraft => ({
   type: event.type,
@@ -77,20 +83,32 @@ export default function EditPanel({
   onClose,
   onSaveEvent,
   onSaveAxis,
+  onReorderAxes,
   onDeleteAxis,
   onUpload,
 }: EditPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const [eventDraft, setEventDraft] = useState<EventDraft>(() => (event ? eventToDraft(event) : emptyEvent()));
+  const [eventDraft, setEventDraft] = useState<EventDraft>(() => (event ? eventToDraft(event) : emptyEvent(axes)));
   const [editingAxisId, setEditingAxisId] = useState<number | null>(null);
   const [axisDraft, setAxisDraft] = useState<AxisDraft>(() => emptyAxis(axes.length));
+  const [orderedAxes, setOrderedAxes] = useState<TimelineAxis[]>(() => sortAxes(axes));
+  const [draggingAxisId, setDraggingAxisId] = useState<number | null>(null);
+  const [reorderBusy, setReorderBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [localError, setLocalError] = useState('');
+  const orderedAxesRef = useRef(orderedAxes);
+  const dragStartOrderRef = useRef<TimelineAxis[]>(orderedAxes);
   const editingAxis = useMemo(() => axes.find((axis) => axis.id === editingAxisId) ?? null, [axes, editingAxisId]);
 
   useEffect(() => {
-    setEventDraft(event ? eventToDraft(event) : emptyEvent());
-  }, [event]);
+    setEventDraft(event ? eventToDraft(event) : emptyEvent(axes));
+  }, [event, axes]);
+
+  useEffect(() => {
+    const next = sortAxes(axes);
+    orderedAxesRef.current = next;
+    setOrderedAxes(next);
+  }, [axes]);
 
   useEffect(() => {
     setAxisDraft(editingAxis ? axisToDraft(editingAxis) : emptyAxis(axes.length));
@@ -110,6 +128,73 @@ export default function EditPanel({
 
   const updateAxis = <K extends keyof AxisDraft>(field: K, value: AxisDraft[K]) => {
     setAxisDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const applyAxisOrder = (next: TimelineAxis[]) => {
+    orderedAxesRef.current = next;
+    setOrderedAxes(next);
+  };
+
+  const commitAxisOrder = async (next: TimelineAxis[]) => {
+    const axisIds = next.map((axis) => axis.id);
+    if (axisIds.every((axisId, index) => sortAxes(axes)[index]?.id === axisId)) return;
+    setLocalError('');
+    setReorderBusy(true);
+    try {
+      await onReorderAxes(axisIds);
+    } catch (error) {
+      applyAxisOrder(sortAxes(axes));
+      setLocalError(error instanceof Error ? error.message : '轴顺序保存失败');
+    } finally {
+      setReorderBusy(false);
+    }
+  };
+
+  const beginAxisDrag = (pointerEvent: ReactPointerEvent<HTMLButtonElement>, axis: TimelineAxis) => {
+    if (axis.is_primary || busy || reorderBusy) return;
+    pointerEvent.preventDefault();
+    pointerEvent.currentTarget.focus();
+    pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId);
+    dragStartOrderRef.current = orderedAxesRef.current;
+    setDraggingAxisId(axis.id);
+  };
+
+  const moveDraggedAxis = (pointerEvent: ReactPointerEvent<HTMLButtonElement>, axisId: number) => {
+    if (draggingAxisId !== axisId) return;
+    const target = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)
+      ?.closest<HTMLElement>('[data-axis-order-id]');
+    const targetId = Number(target?.dataset.axisOrderId);
+    if (!target || !Number.isInteger(targetId) || targetId === axisId) return;
+    const placeAfter = pointerEvent.clientY > target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
+    applyAxisOrder(moveAxisAround(orderedAxesRef.current, axisId, targetId, placeAfter));
+  };
+
+  const finishAxisDrag = (pointerEvent: ReactPointerEvent<HTMLButtonElement>, axisId: number) => {
+    if (draggingAxisId !== axisId) return;
+    if (pointerEvent.currentTarget.hasPointerCapture(pointerEvent.pointerId)) {
+      pointerEvent.currentTarget.releasePointerCapture(pointerEvent.pointerId);
+    }
+    setDraggingAxisId(null);
+    void commitAxisOrder(orderedAxesRef.current);
+  };
+
+  const cancelAxisDrag = (pointerEvent: ReactPointerEvent<HTMLButtonElement>, axisId: number) => {
+    if (draggingAxisId !== axisId) return;
+    if (pointerEvent.currentTarget.hasPointerCapture(pointerEvent.pointerId)) {
+      pointerEvent.currentTarget.releasePointerCapture(pointerEvent.pointerId);
+    }
+    applyAxisOrder(dragStartOrderRef.current);
+    setDraggingAxisId(null);
+  };
+
+  const moveAxisWithKeyboard = (keyboardEvent: ReactKeyboardEvent<HTMLButtonElement>, axis: TimelineAxis) => {
+    if (axis.is_primary || busy || reorderBusy) return;
+    if (keyboardEvent.key !== 'ArrowUp' && keyboardEvent.key !== 'ArrowDown') return;
+    keyboardEvent.preventDefault();
+    const next = moveAxisBy(orderedAxesRef.current, axis.id, keyboardEvent.key === 'ArrowUp' ? -1 : 1);
+    if (next === orderedAxesRef.current) return;
+    applyAxisOrder(next);
+    void commitAxisOrder(next);
   };
 
   const uploadFiles = async (files: FileList | null) => {
@@ -162,7 +247,17 @@ export default function EditPanel({
       setLocalError('轴不能从自己分支');
       return;
     }
-    await onSaveAxis({ ...axisDraft, name: axisDraft.name.trim() }, editingAxisId);
+    const normalizedDraft = editingAxis?.is_primary
+      ? {
+          ...axisDraft,
+          name: axisDraft.name.trim(),
+          parent_axis_id: null,
+          start_date: '',
+          end_date: '',
+          merge_axis_id: null,
+        }
+      : { ...axisDraft, name: axisDraft.name.trim() };
+    await onSaveAxis(normalizedDraft, editingAxisId);
     setEditingAxisId(null);
     setAxisDraft(emptyAxis(axes.length + 1));
   };
@@ -263,62 +358,86 @@ export default function EditPanel({
         ) : (
           <div className="axis-manager">
             <div className="axis-list" data-form-part>
-              {axes.map((axis) => (
-                <button
-                  type="button"
-                  key={axis.id}
-                  className={editingAxisId === axis.id ? 'is-active' : ''}
-                  onClick={() => setEditingAxisId(axis.id)}
-                >
-                  <span style={{ background: axis.color }} />
-                  <strong>{axis.name}</strong>
-                  <small>{axis.parent_axis_id ? '支线' : '主轴'} · {axis.sort_order}</small>
-                </button>
-              ))}
-              <button type="button" className={editingAxisId === null ? 'is-active' : ''} onClick={() => setEditingAxisId(null)}>＋ 新建一条轴</button>
+              <p className="axis-order-note">从上到下对应纸面从左到右；拖过“我们”即可换到主轴另一侧。</p>
+              <div className="axis-order-list" role="list" aria-label="叙事轴画面顺序">
+                {orderedAxes.map((axis) => (
+                  <div
+                    role="listitem"
+                    key={axis.id}
+                    data-axis-order-id={axis.id}
+                    className={`axis-order-item${editingAxisId === axis.id ? ' is-active' : ''}${axis.is_primary ? ' is-primary' : ''}${draggingAxisId === axis.id ? ' is-dragging' : ''}`}
+                    style={{ '--axis-color': axis.color } as React.CSSProperties}
+                  >
+                    <button type="button" className="axis-select" onClick={() => setEditingAxisId(axis.id)}>
+                      <span className="axis-swatch" style={{ background: axis.color }} />
+                      <strong>{axis.name}</strong>
+                      <small>{axis.is_primary ? '主轴 · 固定居中' : axis.parent_axis_id ? '支线' : '叙事轴'}</small>
+                    </button>
+                    {axis.is_primary ? (
+                      <span className="axis-primary-badge" aria-label="主轴固定在画面中央">中心</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="axis-drag-handle"
+                        aria-label={`拖动“${axis.name}”调整画面顺序`}
+                        title="拖动排序；也可用上下方向键"
+                        disabled={busy || reorderBusy}
+                        onPointerDown={(pointerEvent) => beginAxisDrag(pointerEvent, axis)}
+                        onPointerMove={(pointerEvent) => moveDraggedAxis(pointerEvent, axis.id)}
+                        onPointerUp={(pointerEvent) => finishAxisDrag(pointerEvent, axis.id)}
+                        onPointerCancel={(pointerEvent) => cancelAxisDrag(pointerEvent, axis.id)}
+                        onKeyDown={(keyboardEvent) => moveAxisWithKeyboard(keyboardEvent, axis)}
+                      >
+                        拖
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button type="button" className={`axis-create-button${editingAxisId === null ? ' is-active' : ''}`} onClick={() => setEditingAxisId(null)}>＋ 新建一条轴</button>
             </div>
             <form onSubmit={(formEvent) => { formEvent.preventDefault(); void saveAxis(); }}>
               <label data-form-part>
                 <span>轴名称</span>
                 <input maxLength={40} required value={axisDraft.name} onChange={(changeEvent) => updateAxis('name', changeEvent.target.value)} />
               </label>
-              <div className="form-grid" data-form-part>
-                <label>
-                  <span>蜡笔颜色</span>
-                  <input type="color" value={axisDraft.color} onChange={(changeEvent) => updateAxis('color', changeEvent.target.value)} />
-                </label>
-                <label>
-                  <span>排列顺序</span>
-                  <input type="number" min="0" max="99" value={axisDraft.sort_order} onChange={(changeEvent) => updateAxis('sort_order', Number(changeEvent.target.value))} />
-                </label>
-              </div>
               <label data-form-part>
-                <span>从哪条轴分出</span>
-                <select value={axisDraft.parent_axis_id ?? ''} onChange={(changeEvent) => updateAxis('parent_axis_id', changeEvent.target.value ? Number(changeEvent.target.value) : null)}>
-                  <option value="">独立主轴</option>
-                  {axes.filter((axis) => axis.id !== editingAxisId).map((axis) => <option key={axis.id} value={axis.id}>{axis.name}</option>)}
-                </select>
+                <span>蜡笔颜色</span>
+                <input type="color" value={axisDraft.color} onChange={(changeEvent) => updateAxis('color', changeEvent.target.value)} />
               </label>
-              <div className="form-grid" data-form-part>
-                <label>
-                  <span>出现日期</span>
-                  <input type="date" value={axisDraft.start_date} onChange={(changeEvent) => updateAxis('start_date', changeEvent.target.value)} />
-                </label>
-                <label>
-                  <span>结束日期</span>
-                  <input type="date" value={axisDraft.end_date} onChange={(changeEvent) => updateAxis('end_date', changeEvent.target.value)} />
-                </label>
-              </div>
-              <label data-form-part>
-                <span>结束后合流到</span>
-                <select value={axisDraft.merge_axis_id ?? ''} onChange={(changeEvent) => updateAxis('merge_axis_id', changeEvent.target.value ? Number(changeEvent.target.value) : null)}>
-                  <option value="">自然消失</option>
-                  {axes.filter((axis) => axis.id !== editingAxisId).map((axis) => <option key={axis.id} value={axis.id}>{axis.name}</option>)}
-                </select>
-              </label>
+              {editingAxis?.is_primary ? (
+                <p className="primary-axis-rule" data-form-part>“我们”贯穿整张纸，固定在画面中央，不设置分支来源、出现或结束日期。</p>
+              ) : (
+                <>
+                  <label data-form-part>
+                    <span>从哪条轴分出</span>
+                    <select value={axisDraft.parent_axis_id ?? ''} onChange={(changeEvent) => updateAxis('parent_axis_id', changeEvent.target.value ? Number(changeEvent.target.value) : null)}>
+                      <option value="">独立叙事轴</option>
+                      {axes.filter((axis) => axis.id !== editingAxisId).map((axis) => <option key={axis.id} value={axis.id}>{axis.name}</option>)}
+                    </select>
+                  </label>
+                  <div className="form-grid" data-form-part>
+                    <label>
+                      <span>出现日期</span>
+                      <input type="date" value={axisDraft.start_date} onChange={(changeEvent) => updateAxis('start_date', changeEvent.target.value)} />
+                    </label>
+                    <label>
+                      <span>结束日期</span>
+                      <input type="date" value={axisDraft.end_date} onChange={(changeEvent) => updateAxis('end_date', changeEvent.target.value)} />
+                    </label>
+                  </div>
+                  <label data-form-part>
+                    <span>结束后合流到</span>
+                    <select value={axisDraft.merge_axis_id ?? ''} onChange={(changeEvent) => updateAxis('merge_axis_id', changeEvent.target.value ? Number(changeEvent.target.value) : null)}>
+                      <option value="">自然消失</option>
+                      {axes.filter((axis) => axis.id !== editingAxisId).map((axis) => <option key={axis.id} value={axis.id}>{axis.name}</option>)}
+                    </select>
+                  </label>
+                </>
+              )}
               {localError && <div className="form-error" role="alert" data-form-part>{localError}</div>}
               <footer data-form-part>
-                {editingAxis && <button type="button" className="paper-button paper-button--danger" disabled={busy} onClick={() => void onDeleteAxis(editingAxis)}>删除</button>}
+                {editingAxis && !editingAxis.is_primary && <button type="button" className="paper-button paper-button--danger" disabled={busy} onClick={() => void onDeleteAxis(editingAxis)}>删除</button>}
                 <span />
                 <button type="submit" className="paper-button paper-button--primary" disabled={busy}>{busy ? '正在保存…' : editingAxis ? '保存轴' : '创建轴'}</button>
               </footer>

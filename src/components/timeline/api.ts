@@ -93,6 +93,13 @@ export const createAxis = (draft: AxisDraft): Promise<{ axis: TimelineAxis }> =>
 export const updateAxis = (id: number, draft: AxisDraft): Promise<{ axis: TimelineAxis }> =>
   apiFetch(`/axes/${id}`, { method: 'PUT', authenticated: true, body: JSON.stringify(draft) });
 
+export const reorderAxes = (axisIds: number[]): Promise<{ axes: TimelineAxis[] }> =>
+  apiFetch('/axes/order', {
+    method: 'PUT',
+    authenticated: true,
+    body: JSON.stringify({ axis_ids: axisIds }),
+  });
+
 export const deleteAxis = (id: number): Promise<{ ok: true }> =>
   apiFetch(`/axes/${id}`, { method: 'DELETE', authenticated: true });
 

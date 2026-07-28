@@ -23,7 +23,8 @@ export default function Milestone({
   onDelete,
 }: MilestoneProps) {
   const eventAxes = axes.filter((axis) => event.axis_ids.includes(axis.id));
-  const color = event.color || eventAxes[0]?.color || '#b58b58';
+  const anchorAxis = axes.find((axis) => axis.id === event.primaryAxisId);
+  const color = event.color || anchorAxis?.color || eventAxes[0]?.color || '#b58b58';
 
   const open = () => {
     const rect = nodeRef.current?.getBoundingClientRect();

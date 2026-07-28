@@ -35,12 +35,13 @@ export function activeAxesForEvents(axes: TimelineAxis[], events: TimelineEvent[
   const structurallyRequired = new Set<number>();
 
   axes.forEach((axis) => {
+    if (axis.is_primary) structurallyRequired.add(axis.id);
     if (axis.parent_axis_id) structurallyRequired.add(axis.parent_axis_id);
     if (axis.merge_axis_id) structurallyRequired.add(axis.merge_axis_id);
   });
 
   const active = axes.filter((axis) => used.has(axis.id) || structurallyRequired.has(axis.id));
-  const source = active.length > 0 ? active : axes;
+  const source = events.length > 0 && active.length > 0 ? active : axes;
   return [...source].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
 }
 
@@ -54,12 +55,27 @@ export function computeTimelineLayout(
   );
   const activeAxes = activeAxesForEvents(axes, events);
   const axisX = new Map<number, number>();
-  const usable = STAGE_WIDTH - STAGE_MARGIN * 2;
-  const spacing = usable / Math.max(1, activeAxes.length);
-
-  activeAxes.forEach((axis, index) => {
-    axisX.set(axis.id, STAGE_MARGIN + spacing * (index + 0.5));
-  });
+  const primaryAxis = activeAxes.find((axis) => axis.is_primary) ?? null;
+  if (primaryAxis) {
+    const primaryIndex = activeAxes.indexOf(primaryAxis);
+    const leftAxes = activeAxes.slice(0, primaryIndex);
+    const rightAxes = activeAxes.slice(primaryIndex + 1);
+    const centerX = STAGE_WIDTH / 2;
+    const halfWidth = centerX - STAGE_MARGIN;
+    leftAxes.forEach((axis, index) => {
+      axisX.set(axis.id, STAGE_MARGIN + (halfWidth * (index + 1)) / (leftAxes.length + 1));
+    });
+    axisX.set(primaryAxis.id, centerX);
+    rightAxes.forEach((axis, index) => {
+      axisX.set(axis.id, centerX + (halfWidth * (index + 1)) / (rightAxes.length + 1));
+    });
+  } else {
+    const usable = STAGE_WIDTH - STAGE_MARGIN * 2;
+    const spacing = usable / Math.max(1, activeAxes.length);
+    activeAxes.forEach((axis, index) => {
+      axisX.set(axis.id, STAGE_MARGIN + spacing * (index + 0.5));
+    });
+  }
 
   const positioned: PositionedEvent[] = [];
   const folds: FoldMarker[] = [];
@@ -88,13 +104,18 @@ export function computeTimelineLayout(
       }
     }
 
-    const primaryAxisId = event.axis_ids.find((axisId) => axisX.has(axisId)) ?? null;
+    const primaryAxisId = primaryAxis && event.axis_ids.includes(primaryAxis.id)
+      ? primaryAxis.id
+      : activeAxes.find((axis) => event.axis_ids.includes(axis.id))?.id ?? null;
     const x = primaryAxisId ? (axisX.get(primaryAxisId) ?? STAGE_WIDTH / 2) : STAGE_WIDTH / 2;
+    const side = primaryAxisId === primaryAxis?.id
+      ? event.id % 2 === 0 ? 'right' : 'left'
+      : x <= STAGE_WIDTH / 2 ? 'right' : 'left';
     positioned.push({
       ...event,
       x,
       y,
-      side: x <= STAGE_WIDTH / 2 ? 'right' : 'left',
+      side,
       primaryAxisId,
     });
   });

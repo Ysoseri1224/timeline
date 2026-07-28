@@ -8,6 +8,7 @@ const axes: TimelineAxis[] = [
     name: '我们',
     color: '#9b6573',
     sort_order: 0,
+    is_primary: true,
     parent_axis_id: null,
     start_date: null,
     end_date: null,
@@ -68,5 +69,44 @@ describe('timeline layout', () => {
 
     expect(layout.folds).toHaveLength(1);
     expect(layout.folds[0]!.y).toBeGreaterThan(milestone.y + 240);
+  });
+
+  it('把主轴固定在几何中心，并按顺序分布两侧轴', () => {
+    const arrangedAxes: TimelineAxis[] = [
+      { ...axes[0]!, id: 2, name: '我', sort_order: 0, is_primary: false },
+      { ...axes[0]!, id: 1, name: '我们', sort_order: 1, is_primary: true },
+      { ...axes[0]!, id: 3, name: '她', sort_order: 2, is_primary: false },
+      { ...axes[0]!, id: 4, name: '旅行', sort_order: 3, is_primary: false },
+    ];
+    const layout = computeTimelineLayout(arrangedAxes, [], 'compact');
+
+    expect(layout.axisX.get(1)).toBe(600);
+    expect(layout.axisX.get(2)).toBeLessThan(600);
+    expect(layout.axisX.get(3)).toBeGreaterThan(600);
+    expect(layout.axisX.get(4)).toBeGreaterThan(layout.axisX.get(3)!);
+  });
+
+  it('事件包含主轴时优先挂到主轴，并按事件 id 稳定分列', () => {
+    const secondary: TimelineAxis = { ...axes[0]!, id: 2, name: '旅行', sort_order: 0, is_primary: false };
+    const primary: TimelineAxis = { ...axes[0]!, sort_order: 1 };
+    const layout = computeTimelineLayout(
+      [secondary, primary],
+      [
+        { ...events[0]!, id: 8, axis_ids: [2, 1] },
+        { ...events[1]!, id: 7, axis_ids: [2, 1] },
+      ],
+      'compact',
+    );
+
+    expect(layout.events.map((event) => event.primaryAxisId)).toEqual([1, 1]);
+    expect(layout.events.map((event) => event.side)).toEqual(['right', 'left']);
+  });
+
+  it('没有事件挂载时仍保留主轴', () => {
+    const secondary: TimelineAxis = { ...axes[0]!, id: 2, name: '旅行', sort_order: 1, is_primary: false };
+    const layout = computeTimelineLayout([axes[0]!, secondary], [{ ...events[0]!, axis_ids: [2] }], 'compact');
+
+    expect(layout.axisX.has(1)).toBe(true);
+    expect(layout.axisX.has(2)).toBe(true);
   });
 });

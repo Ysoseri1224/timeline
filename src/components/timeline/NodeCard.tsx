@@ -30,7 +30,8 @@ export default function NodeCard({
   onDelete,
 }: NodeCardProps) {
   const eventAxes = axes.filter((axis) => event.axis_ids.includes(axis.id));
-  const axisColor = event.color || eventAxes[0]?.color || '#8d6d63';
+  const anchorAxis = axes.find((axis) => axis.id === event.primaryAxisId);
+  const axisColor = event.color || anchorAxis?.color || eventAxes[0]?.color || '#8d6d63';
   const preview = event.description?.trim() || event.subtitle?.trim() || '';
   const thumbnail = event.media[0];
 
