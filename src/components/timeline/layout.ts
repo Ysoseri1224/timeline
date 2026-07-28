@@ -80,6 +80,7 @@ export function computeTimelineLayout(
   const positioned: PositionedEvent[] = [];
   const folds: FoldMarker[] = [];
   let y = STAGE_TOP;
+  let primaryEventIndex = 0;
 
   events.forEach((event, index) => {
     if (index > 0) {
@@ -108,8 +109,9 @@ export function computeTimelineLayout(
       ? primaryAxis.id
       : activeAxes.find((axis) => event.axis_ids.includes(axis.id))?.id ?? null;
     const x = primaryAxisId ? (axisX.get(primaryAxisId) ?? STAGE_WIDTH / 2) : STAGE_WIDTH / 2;
-    const side = primaryAxisId === primaryAxis?.id
-      ? event.id % 2 === 0 ? 'right' : 'left'
+    const isPrimaryEvent = primaryAxisId === primaryAxis?.id;
+    const side = isPrimaryEvent
+      ? primaryEventIndex % 2 === 0 ? 'right' : 'left'
       : x <= STAGE_WIDTH / 2 ? 'right' : 'left';
     positioned.push({
       ...event,
@@ -118,6 +120,7 @@ export function computeTimelineLayout(
       side,
       primaryAxisId,
     });
+    if (isPrimaryEvent) primaryEventIndex += 1;
   });
 
   const years: TimelineLayout['years'] = [];

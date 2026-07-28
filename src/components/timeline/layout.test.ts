@@ -86,20 +86,39 @@ describe('timeline layout', () => {
     expect(layout.axisX.get(4)).toBeGreaterThan(layout.axisX.get(3)!);
   });
 
-  it('事件包含主轴时优先挂到主轴，并按事件 id 稳定分列', () => {
+  it('事件包含主轴时优先挂到主轴，并按时间顺序严格左右交替', () => {
     const secondary: TimelineAxis = { ...axes[0]!, id: 2, name: '旅行', sort_order: 0, is_primary: false };
     const primary: TimelineAxis = { ...axes[0]!, sort_order: 1 };
     const layout = computeTimelineLayout(
       [secondary, primary],
       [
-        { ...events[0]!, id: 8, axis_ids: [2, 1] },
-        { ...events[1]!, id: 7, axis_ids: [2, 1] },
+        { ...events[1]!, id: 2, event_date: '2026-04-01', axis_ids: [2, 1] },
+        { ...events[0]!, id: 9, event_date: '2026-07-01', axis_ids: [2, 1] },
+        { ...events[1]!, id: 6, event_date: '2026-01-01', axis_ids: [2, 1] },
+        { ...events[1]!, id: 5, event_date: '2025-10-01', axis_ids: [2, 1] },
       ],
       'compact',
     );
 
-    expect(layout.events.map((event) => event.primaryAxisId)).toEqual([1, 1]);
-    expect(layout.events.map((event) => event.side)).toEqual(['right', 'left']);
+    expect(layout.events.map((event) => event.id)).toEqual([9, 2, 6, 5]);
+    expect(layout.events.map((event) => event.primaryAxisId)).toEqual([1, 1, 1, 1]);
+    expect(layout.events.map((event) => event.side)).toEqual(['right', 'left', 'right', 'left']);
+  });
+
+  it('次轴事件不占用主轴的左右交替序号', () => {
+    const secondary: TimelineAxis = { ...axes[0]!, id: 2, name: '旅行', sort_order: 0, is_primary: false };
+    const primary: TimelineAxis = { ...axes[0]!, sort_order: 1 };
+    const layout = computeTimelineLayout(
+      [secondary, primary],
+      [
+        { ...events[0]!, id: 9, event_date: '2026-07-01', axis_ids: [1] },
+        { ...events[0]!, id: 8, event_date: '2026-06-01', axis_ids: [2] },
+        { ...events[0]!, id: 7, event_date: '2026-05-01', axis_ids: [1] },
+      ],
+      'compact',
+    );
+
+    expect(layout.events.filter((event) => event.primaryAxisId === 1).map((event) => event.side)).toEqual(['right', 'left']);
   });
 
   it('没有事件挂载时仍保留主轴', () => {
