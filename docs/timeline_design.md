@@ -311,10 +311,11 @@ const ink = `oklch(${lerp(0.25, 0.32, progress)} ${lerp(0.02, 0.03, progress)} $
 
 ### 5.4 纸张纹理
 
-纸面仍由细颗粒、长纤维和纸浆色斑三层组成，但不再把两组 `feTurbulence` 作为 124% 尺寸的 fixed SVG 覆盖整页：
+纸面仍由细颗粒、长纤维和纸浆密度云三层组成，但不再把 `feTurbulence` 作为 124% 尺寸的 fixed SVG 覆盖整页：
 
 - 细颗粒和长纤维改为预加载的小尺寸可平铺 SVG，浏览器只需解码、缓存纹理单元；
-- 纸浆色斑保留多组不规则径向色斑，纹理层跟随纸面文档坐标；
+- 纸浆层使用预加载的大尺寸低频随机纹理，表达纸浆厚薄与明暗不均；禁止规则圆环、可辨认的渐变中心或其他周期性几何图案；
+- 三种稳定材质只解码和缓存，不随滚动重算；内容驱动的色温老化仍按事件实际 Y 坐标独立生成；
 - 噪点强度仍从 0.105 连续增加到 0.145，通过一次生成的 Y 坐标 mask 表达；
 - 不使用 `mix-blend-mode`、整页 `filter` 或 fixed 纹理，因此滚动不触发背景样式写入。
 
@@ -533,7 +534,7 @@ timeline/                              # 独立公开 GitHub 仓库与 Pages 项
 │   ├── components/timeline/          # React UI、布局、API、排序与测试
 │   └── styles/timeline.css           # 色温变量、纸张纹理与组件样式
 ├── public/fonts/                     # Instrument Serif 自托管字体
-├── public/textures/                  # 预加载、可平铺的纸张颗粒与纤维
+├── public/textures/                  # 预加载、可平铺的纸浆、颗粒与纤维
 ├── wrangler.jsonc                    # Cloudflare Pages 配置
 ├── wrangler.d1.jsonc                 # 独立 D1 migration 配置
 └── package.json

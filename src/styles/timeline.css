@@ -101,12 +101,10 @@ select:focus-visible {
 }
 
 .paper-surface__pulp {
-  background:
-    radial-gradient(ellipse at 16% 4%, rgba(255, 255, 255, 0.32), transparent 34%),
-    radial-gradient(ellipse at 84% 45%, rgba(118, 81, 40, 0.062), transparent 39%),
-    radial-gradient(ellipse at 28% 72%, rgba(151, 112, 64, 0.052), transparent 32%),
-    radial-gradient(ellipse at 74% 92%, rgba(86, 66, 43, 0.046), transparent 31%),
-    repeating-radial-gradient(ellipse at 38% 31%, transparent 0 46px, rgba(116, 84, 47, 0.016) 48px 49px, transparent 52px 108px);
+  background-image: url('/timeline/textures/paper-pulp.svg');
+  background-position: 173px 91px;
+  background-repeat: repeat;
+  background-size: 1024px 768px;
 }
 
 .paper-surface__texture {
