@@ -148,10 +148,12 @@
 
 | 类型 | 默认态 | 视觉感受 |
 |------|--------|----------|
-| 文字 | 日期（Caveat 手写体）+ 标题 + 描述前20字省略 | 日记里的短句 |
-| 照片 | 日期 + 标题 + 缩略图（64×64 圆角 cover，1-2° 随机旋转） | 贴在页边的拍立得 |
-| 视频 | 日期 + 标题 + 封面图缩略 + 播放三角图标 | 同照片但有播放暗示 |
+| 普通记录 | 日期 + 标题 + 正文摘要 + 手选封面 + 自动内容构成 | 同一种日记版式，可同时承载文字、图片与视频 |
 | 里程碑 | 全宽卡片 + 半透明色块背景 + 大标题 + 副标题 | 章节封面，默认展开 |
+
+- `type` 只表达结构版式，取值为 `entry` 或 `milestone`，不再把文字、照片、视频误作互斥节点类型；
+- 普通记录的内容构成从实际字段和媒体清单自动推导，例如“文字 · 6 图 · 1 视频”，不保存需要用户维护的冗余标签；
+- `cover_media_key` 可从当前事件的任一图片或视频中手动指定；未指定、封面被移除或 key 失效时回退到第一个附件。
 
 #### 节点位置
 
@@ -190,19 +192,21 @@ box-shadow: 0 8px 24px rgba(44,36,22,0.10);
 
 #### 展开后内容排版
 
-**文字节点**：
+**普通记录**：
 - 标题：Instrument Serif
 - 日期：Caveat 手写体小字，颜色浅一档
 - 正文：Instrument Serif 15-16px，行高 1.8
+- 文字、图片与视频可同时存在，默认节点展示自动生成的内容构成
+- 封面使用手动指定的媒体；没有有效指定时使用第一个附件
 - 底部：tag chips（所属轴标识）
 
-**照片节点**：
+**图片内容**：
 - 照片占浮层主体（宽度 100%，max-height 约束）
 - 多张照片横向排列，可左右滑动或 grid
 - 点击单张 → GLightbox 全屏
 - 照片下方可选 caption（Caveat 手写体）
 
-**视频节点**：
+**视频内容**：
 - 展开后内嵌 `<video>` 播放器
 - 不自动播放，点击播放
 - R2 存 mp4 → 原生 `<video>`
@@ -452,13 +456,14 @@ ON timeline_axes(is_primary) WHERE is_primary = 1;
 
 CREATE TABLE timeline_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  type TEXT NOT NULL CHECK(type IN ('text','photo','video','milestone')),
+  type TEXT NOT NULL CHECK(type IN ('entry','milestone')),
   title TEXT NOT NULL,
   subtitle TEXT,
   description TEXT,
   event_date TEXT NOT NULL,
   color TEXT,
   media TEXT NOT NULL DEFAULT '[]',
+  cover_media_key TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -471,6 +476,7 @@ CREATE TABLE timeline_event_axes (
 ```
 
 - migration `0002_primary_axis_and_order.sql` 将“我们”升级为唯一主轴，并把既有 `sort_order` 归一化为连续的 `0..n-1`
+- migration `0003_entry_type_and_cover.sql` 将非里程碑事件统一迁移为 `entry`，保留全部轴关联，并从既有媒体清单首项初始化封面
 - 轴顺序必须整组提交，Worker 使用 D1 `batch()` 原子更新全部轴，避免局部失败留下重复或断裂顺序
 
 ### 8.3 API 路由

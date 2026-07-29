@@ -1,5 +1,5 @@
 export type TimelineMode = 'compact' | 'chronological';
-export type EventType = 'text' | 'photo' | 'video' | 'milestone';
+export type EventType = 'entry' | 'milestone';
 
 export interface TimelineAxis {
   id: number;
@@ -32,6 +32,7 @@ export interface TimelineEvent {
   event_date: string;
   color: string | null;
   media: TimelineMedia[];
+  cover_media_key: string | null;
   axis_ids: number[];
   created_at?: string;
   updated_at?: string;
@@ -45,6 +46,7 @@ export interface EventDraft {
   event_date: string;
   color: string;
   media: TimelineMedia[];
+  cover_media_key: string | null;
   axis_ids: number[];
 }
 

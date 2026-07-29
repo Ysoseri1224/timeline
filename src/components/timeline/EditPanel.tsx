@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { moveAxisAround, moveAxisBy, sortAxes } from './axisOrder';
+import { describeEventContent, normalizeCoverMediaKey } from './contentPresentation';
 import type {
   AxisDraft,
   EventDraft,
@@ -33,13 +34,14 @@ const today = (): string => {
 const emptyEvent = (axes: TimelineAxis[]): EventDraft => {
   const primaryAxis = axes.find((axis) => axis.is_primary);
   return {
-    type: 'text',
+    type: 'entry',
     title: '',
     subtitle: '',
     description: '',
     event_date: today(),
     color: '',
     media: [],
+    cover_media_key: null,
     axis_ids: primaryAxis ? [primaryAxis.id] : [],
   };
 };
@@ -52,6 +54,7 @@ const eventToDraft = (event: TimelineEvent): EventDraft => ({
   event_date: event.event_date,
   color: event.color || '',
   media: event.media,
+  cover_media_key: event.cover_media_key,
   axis_ids: event.axis_ids,
 });
 
@@ -249,7 +252,14 @@ export default function EditPanel({
         const media = await onUpload(file, setUploadProgress);
         uploaded.push(media);
       }
-      setEventDraft((current) => ({ ...current, media: [...current.media, ...uploaded] }));
+      setEventDraft((current) => {
+        const media = [...current.media, ...uploaded];
+        return {
+          ...current,
+          media,
+          cover_media_key: normalizeCoverMediaKey(media, current.cover_media_key),
+        };
+      });
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : '媒体上传失败');
     } finally {
@@ -274,6 +284,7 @@ export default function EditPanel({
         subtitle: eventDraft.subtitle.trim(),
         description: eventDraft.description.trim(),
         color: eventDraft.color.trim(),
+        cover_media_key: normalizeCoverMediaKey(eventDraft.media, eventDraft.cover_media_key),
       },
       event?.id ?? null,
     );
@@ -319,11 +330,9 @@ export default function EditPanel({
           <form onSubmit={(formEvent) => { formEvent.preventDefault(); void saveEvent(); }}>
             <div className="form-grid" data-form-part>
               <label>
-                <span>类型</span>
+                <span>版式</span>
                 <select value={eventDraft.type} onChange={(changeEvent) => updateEvent('type', changeEvent.target.value as EventDraft['type'])}>
-                  <option value="text">文字</option>
-                  <option value="photo">照片</option>
-                  <option value="video">视频</option>
+                  <option value="entry">普通记录</option>
                   <option value="milestone">里程碑</option>
                 </select>
               </label>
@@ -344,6 +353,10 @@ export default function EditPanel({
               <span>正文</span>
               <textarea rows={7} maxLength={8000} value={eventDraft.description} onChange={(changeEvent) => updateEvent('description', changeEvent.target.value)} placeholder="像写日记一样，不必很完整。" />
             </label>
+            <p className="content-composition" data-form-part>
+              <span>内容构成</span>
+              <strong>{describeEventContent(eventDraft)}</strong>
+            </p>
             <fieldset data-form-part>
               <legend>挂在哪些轴上</legend>
               <div className="axis-checks">
@@ -378,15 +391,40 @@ export default function EditPanel({
             {eventDraft.media.length > 0 && (
               <div className="media-editor" data-form-part>
                 {eventDraft.media.map((media, index) => (
-                  <div key={media.key}>
-                    {media.type === 'image' ? <img src={media.url} alt="" /> : <video src={`${media.url}#t=0.1`} muted preload="metadata" />}
+                  <div key={media.key} className={eventDraft.cover_media_key === media.key ? 'is-cover' : ''}>
+                    <div className="media-editor-preview">
+                      {media.type === 'image' ? <img src={media.url} alt="" /> : <video src={`${media.url}#t=0.1`} muted preload="metadata" />}
+                      {eventDraft.cover_media_key === media.key && <span>封面</span>}
+                    </div>
                     <input
                       value={media.caption}
                       maxLength={180}
                       placeholder="caption"
-                      onChange={(changeEvent) => updateEvent('media', eventDraft.media.map((item, mediaIndex) => mediaIndex === index ? { ...item, caption: changeEvent.target.value } : item))}
+                      onChange={(changeEvent) => setEventDraft((current) => ({
+                        ...current,
+                        media: current.media.map((item, mediaIndex) => mediaIndex === index ? { ...item, caption: changeEvent.target.value } : item),
+                      }))}
                     />
-                    <button type="button" onClick={() => updateEvent('media', eventDraft.media.filter((_, mediaIndex) => mediaIndex !== index))}>移除</button>
+                    <div className="media-editor-actions">
+                      <button
+                        type="button"
+                        aria-pressed={eventDraft.cover_media_key === media.key}
+                        onClick={() => updateEvent('cover_media_key', media.key)}
+                      >
+                        {eventDraft.cover_media_key === media.key ? '当前封面' : '设为封面'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEventDraft((current) => {
+                          const nextMedia = current.media.filter((_, mediaIndex) => mediaIndex !== index);
+                          return {
+                            ...current,
+                            media: nextMedia,
+                            cover_media_key: normalizeCoverMediaKey(nextMedia, current.cover_media_key),
+                          };
+                        })}
+                      >移除</button>
+                    </div>
                   </div>
                 ))}
               </div>

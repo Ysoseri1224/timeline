@@ -1,4 +1,5 @@
 import type { MouseEvent, RefObject } from 'react';
+import { describeEventContent, resolveCoverMedia } from './contentPresentation';
 import type { PositionedEvent, TimelineAxis } from './types';
 
 interface NodeCardProps {
@@ -37,7 +38,8 @@ export default function NodeCard({
   const anchorAxis = axes.find((axis) => axis.id === event.primaryAxisId);
   const axisColor = event.color || anchorAxis?.color || eventAxes[0]?.color || '#8d6d63';
   const preview = event.description?.trim() || event.subtitle?.trim() || '';
-  const thumbnail = event.media[0];
+  const thumbnail = resolveCoverMedia(event);
+  const contentDescription = describeEventContent(event);
 
   const handleOpen = () => {
     const rect = nodeRef.current?.getBoundingClientRect();
@@ -91,6 +93,7 @@ export default function NodeCard({
               {preview && <span>{preview.slice(0, 38)}{preview.length > 38 ? '…' : ''}</span>}
             </span>
           </span>
+          <span className="node-content-description">{contentDescription}</span>
           <span className="node-tags">
             {eventAxes.map((axis) => (
               <span key={axis.id} style={{ '--chip-color': axis.color } as React.CSSProperties}>{axis.name}</span>

@@ -17,13 +17,14 @@ const axis: TimelineAxis = {
 
 const event = (id: number, date: string): TimelineEvent => ({
   id,
-  type: 'text',
+  type: 'entry',
   title: `事件 ${id}`,
   subtitle: null,
   description: null,
   event_date: date,
   color: null,
   media: [],
+  cover_media_key: null,
   axis_ids: [1],
 });
 

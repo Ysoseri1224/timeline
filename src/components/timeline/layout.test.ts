@@ -19,24 +19,26 @@ const axes: TimelineAxis[] = [
 const events: TimelineEvent[] = [
   {
     id: 2,
-    type: 'text',
+    type: 'entry',
     title: '后来',
     subtitle: null,
     description: null,
     event_date: '2026-07-01',
     color: null,
     media: [],
+    cover_media_key: null,
     axis_ids: [1],
   },
   {
     id: 1,
-    type: 'text',
+    type: 'entry',
     title: '从前',
     subtitle: null,
     description: null,
     event_date: '2025-01-01',
     color: null,
     media: [],
+    cover_media_key: null,
     axis_ids: [1],
   },
 ];

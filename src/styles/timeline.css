@@ -439,6 +439,14 @@ select:focus-visible {
   line-height: 1.55;
 }
 
+.node-content-description {
+  margin-top: 7px;
+  color: var(--ink-faint);
+  font-family: 'Caveat', 'Noto Serif SC', cursive;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .node-thumbnail {
   position: relative;
   flex: 0 0 64px;
@@ -1135,6 +1143,23 @@ select:focus-visible {
   gap: 22px;
 }
 
+.content-composition {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: -7px 0 0;
+  color: var(--ink-faint);
+  font-family: 'Caveat', 'Noto Serif SC', cursive;
+  font-size: 14px;
+}
+
+.content-composition strong {
+  color: var(--ink-soft);
+  font-family: 'Noto Serif SC', serif;
+  font-size: 12px;
+  font-weight: 400;
+}
+
 .edit-sheet small {
   color: var(--ink-faint);
   font-size: 12px;
@@ -1215,6 +1240,30 @@ select:focus-visible {
 .media-editor > div {
   display: grid;
   gap: 5px;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.media-editor > div.is-cover {
+  border-color: color-mix(in oklch, var(--ink) 16%, transparent);
+  background: color-mix(in oklch, var(--ink) 3%, transparent);
+}
+
+.media-editor-preview {
+  position: relative;
+}
+
+.media-editor-preview > span {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--paper);
+  background: color-mix(in oklch, var(--ink) 82%, transparent);
+  font-family: 'Caveat', cursive;
+  font-size: 12px;
 }
 
 .media-editor img,
@@ -1230,6 +1279,12 @@ select:focus-visible {
   font-size: 11px;
 }
 
+.media-editor-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .media-editor button {
   justify-self: start;
   padding: 2px 0;
@@ -1238,6 +1293,11 @@ select:focus-visible {
   background: transparent;
   font-family: 'Caveat', cursive;
   cursor: pointer;
+}
+
+.media-editor button[aria-pressed='true'] {
+  color: var(--ink);
+  cursor: default;
 }
 
 .edit-sheet footer {
