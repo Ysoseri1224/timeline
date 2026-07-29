@@ -478,6 +478,7 @@ CREATE TABLE timeline_event_axes (
 - migration `0002_primary_axis_and_order.sql` 将“我们”升级为唯一主轴，并把既有 `sort_order` 归一化为连续的 `0..n-1`
 - migration `0003_entry_type_and_cover.sql` 将非里程碑事件统一迁移为 `entry`，保留全部轴关联，并从既有媒体清单首项初始化封面
 - 轴顺序必须整组提交，Worker 使用 D1 `batch()` 原子更新全部轴，避免局部失败留下重复或断裂顺序
+- 生产数据库只初始化轴结构，不自动填充事件；用于验收的模拟事件和关联媒体在验证完成后必须清理，真实内容由用户自行写入
 
 ### 8.3 API 路由
 
