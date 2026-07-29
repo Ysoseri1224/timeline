@@ -1,7 +1,7 @@
 # Timeline 设计文档（PRD + SOP）
 
 > luckyrong.ysoseri.us/timeline — 恋爱时间轴
-> 最后更新：2026-07-28
+> 最后更新：2026-07-29
 
 ---
 
@@ -276,7 +276,9 @@ box-shadow: 0 8px 24px rgba(44,36,22,0.10);
 
 ### 5.1 驱动方式
 
-GSAP ScrollTrigger，`scrub: true`（硬跟手，1:1 同步）。
+纸张老化绑定纸面内容坐标，而不是绑定滚动帧：背景渐变锚点使用 `stage.offsetTop + layout.events[i].y` 的实际页面 Y 坐标。滚动只是在翻阅已经生成的纸面，不再逐帧写入全局颜色变量或重绘整页纹理。
+
+新增、删除、编辑事件或切换时间模式时重新计算锚点；日常滚动期间不做背景计算。事件墨色同样按日期年龄一次计算，并作为节点局部 CSS 变量使用。
 
 ### 5.2 变化维度
 
@@ -284,33 +286,40 @@ GSAP ScrollTrigger，`scrub: true`（硬跟手，1:1 同步）。
 |------|----------------|----------------|----------|
 | 背景色 | `oklch(0.96 0.01 80)` | `oklch(0.90 0.04 75)` | oklch 线性 |
 | 墨水色 | `oklch(0.25 0.02 260)` | `oklch(0.32 0.03 55)` | oklch longer hue path |
-| 噪点 opacity | 0.025 | 0.06 | 线性 |
+| 噪点 opacity | 0.105 | 0.145 | 线性 |
 
 ### 5.3 Hue 插值路径
 
 墨水色的 hue 从 260° 到 55°，必须走 longer path（经 300° → 0° → 55°），不走 shorter path（会经过绿色区域）。
 
-实现方式：GSAP 不原生支持 oklch hue direction，需要拆成多段 keyframes 或用自定义 onUpdate 回调手动计算中间色。
+实现方式：在 `paperAging.ts` 中用纯函数按事件日期一次计算进度，显式把 hue 按 155° 长路径插值并处理 360° 回绕；不在 ScrollTrigger `onUpdate` 中计算。
 
 ```js
-// 方案：用 onUpdate 手动插值
-gsap.to({ progress: 0 }, {
-  progress: 1,
-  ease: 'none',
-  scrollTrigger: { ... scrub: true },
-  onUpdate: function() {
-    const p = this.targets()[0].progress;
-    // 手动计算 hue: 260 → 300 → 360 → 55 (总跨度 155°)
-    const hue = 260 + p * 155; // 简化版，实际需处理 360° 回绕
-    const adjustedHue = hue > 360 ? hue - 360 : hue;
-    root.style.setProperty('--ink', `oklch(${lerp(0.25, 0.32, p)} ${lerp(0.02, 0.03, p)} ${adjustedHue})`);
-  }
-});
+const rawHue = 260 + progress * 155;
+const hue = rawHue > 360 ? rawHue - 360 : rawHue;
+const ink = `oklch(${lerp(0.25, 0.32, progress)} ${lerp(0.02, 0.03, progress)} ${hue})`;
 ```
 
 ### 5.4 纸张纹理
 
-SVG feTurbulence 噪点层，固定叠加在背景上，opacity 随滚动连续变化（0.025 → 0.06）。
+纸面仍由细颗粒、长纤维和纸浆色斑三层组成，但不再把两组 `feTurbulence` 作为 124% 尺寸的 fixed SVG 覆盖整页：
+
+- 细颗粒和长纤维改为预加载的小尺寸可平铺 SVG，浏览器只需解码、缓存纹理单元；
+- 纸浆色斑保留多组不规则径向色斑，纹理层跟随纸面文档坐标；
+- 噪点强度仍从 0.105 连续增加到 0.145，通过一次生成的 Y 坐标 mask 表达；
+- 不使用 `mix-blend-mode`、整页 `filter` 或 fixed 纹理，因此滚动不触发背景样式写入。
+
+### 5.5 内容更新的实时性与无感事务
+
+增删改、轴顺序变化和模式切换必须作为一次完整视觉事务提交：
+
+1. API 与新布局准备完成前保留旧页面；失败时旧页面不消失；
+2. 记录当前视口内的锚点事件及其相对偏移；
+3. 保留旧 stage 快照和旧背景，新背景按新布局实际 Y 坐标准备；
+4. 同一条 GSAP timeline 在 400ms 内让旧/新背景 opacity 交叉淡化、节点移动、旧/新轴层交叉淡化；新轴的 stroke-dashoffset 同步生长；
+5. 动画结束后清理旧层和临时 `will-change`，并恢复阅读锚点。
+
+删除事件时，新背景会在被删节点的旧 Y 位置加入由相邻新锚点插值得到的临时桥接色；事务结束后移除该冗余锚点。连续操作由 revision 机制取消旧结果，只允许最新请求提交，避免快速新增或切换时抖动。
 
 ---
 
@@ -363,6 +372,7 @@ const pathD = branchCurve([
 - Rough.js 输出多段 path
 - 对每段 path 设置 `stroke-dasharray` = 总长度，`stroke-dashoffset` = 总长度
 - GSAP stagger 动画递减 dashoffset → 0（线条逐渐显现）
+- 普通增删改和模式切换不重复整页生长，改为随视觉事务交叉淡化；只有首次加载或新建轴执行 stroke-dashoffset 生长
 
 ---
 
@@ -378,7 +388,7 @@ GSAP v3.15.0 + ScrollTrigger + Timeline。GSAP skills 已安装（8 个 skill �
 
 | # | 动画 | GSAP 工具 | 触发条件 |
 |---|------|-----------|----------|
-| 1 | 色温漂移 | ScrollTrigger scrub:true | 滚动 |
+| 1 | 纸张老化背景更新 | Timeline opacity 交叉淡化 | 内容/布局变化 |
 | 2 | 节点入场 | ScrollTrigger + stagger | 节点进入视口 |
 | 3 | 浮层展开 | Timeline | 点击节点 |
 | 4 | 浮层收起 | timeline.reverse() | 点击关闭/背景 |
@@ -387,6 +397,7 @@ GSAP v3.15.0 + ScrollTrigger + Timeline。GSAP skills 已安装（8 个 skill �
 | 7 | 筛选切换 | fadeOut/fadeIn 编排 | 点击筛选 chip |
 | 8 | 模式切换 | 节点位置重排 | 点击模式 toggle |
 | 9 | 轴出现/消失 | width/opacity 过渡 | 时间段变化 |
+| 10 | 完整视觉事务 | 单一 Timeline，400ms | 增删改/模式/轴顺序变化 |
 
 ### 7.3 hover 交互
 

@@ -6,6 +6,8 @@ interface MilestoneProps {
   axes: TimelineAxis[];
   dimmed: boolean;
   editor: boolean;
+  paperColor: string;
+  inkColor: string;
   nodeRef: RefObject<HTMLDivElement | null>;
   onOpen: (event: PositionedEvent, rect: DOMRect) => void;
   onEdit: (event: PositionedEvent) => void;
@@ -17,6 +19,8 @@ export default function Milestone({
   axes,
   dimmed,
   editor,
+  paperColor,
+  inkColor,
   nodeRef,
   onOpen,
   onEdit,
@@ -46,6 +50,8 @@ export default function Milestone({
         {
           transform: `translate3d(0, ${event.y}px, 0)`,
           '--axis-color': color,
+          '--paper': paperColor,
+          '--ink': inkColor,
         } as React.CSSProperties
       }
     >

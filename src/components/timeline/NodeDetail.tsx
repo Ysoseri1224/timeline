@@ -8,10 +8,12 @@ interface NodeDetailProps {
   event: PositionedEvent;
   axes: TimelineAxis[];
   origin: DOMRect;
+  paperColor: string;
+  inkColor: string;
   onClose: () => void;
 }
 
-export default function NodeDetail({ event, axes, origin, onClose }: NodeDetailProps) {
+export default function NodeDetail({ event, axes, origin, paperColor, inkColor, onClose }: NodeDetailProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const closeTimelineRef = useRef<gsap.core.Timeline | null>(null);
@@ -112,7 +114,14 @@ export default function NodeDetail({ event, axes, origin, onClose }: NodeDetailP
         role="dialog"
         aria-modal="true"
         aria-labelledby="detail-title"
-        style={{ left, top, width: panelWidth, transformOrigin: origin.left > viewportWidth / 2 ? 'right top' : 'left top' }}
+        style={{
+          left,
+          top,
+          width: panelWidth,
+          transformOrigin: origin.left > viewportWidth / 2 ? 'right top' : 'left top',
+          '--paper': paperColor,
+          '--ink': inkColor,
+        } as React.CSSProperties}
       >
         <button className="detail-close" type="button" onClick={close} aria-label="关闭详情">×</button>
         <time data-detail-part>{event.event_date.replaceAll('-', ' · ')}</time>

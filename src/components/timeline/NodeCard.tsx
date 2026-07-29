@@ -7,6 +7,8 @@ interface NodeCardProps {
   selected: boolean;
   dimmed: boolean;
   editor: boolean;
+  paperColor: string;
+  inkColor: string;
   nodeRef: RefObject<HTMLDivElement | null>;
   onOpen: (event: PositionedEvent, rect: DOMRect) => void;
   onEdit: (event: PositionedEvent) => void;
@@ -24,6 +26,8 @@ export default function NodeCard({
   selected,
   dimmed,
   editor,
+  paperColor,
+  inkColor,
   nodeRef,
   onOpen,
   onEdit,
@@ -56,6 +60,8 @@ export default function NodeCard({
           left: `${(event.x / 1200) * 100}%`,
           transform: `translate3d(-50%, ${event.y}px, 0)`,
           '--axis-color': axisColor,
+          '--paper': paperColor,
+          '--ink': inkColor,
         } as React.CSSProperties
       }
     >

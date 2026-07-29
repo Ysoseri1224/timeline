@@ -23,6 +23,7 @@ const pathFor = (points: Point[], curve: typeof curveBumpY = curveBumpY): string
 
 export default function AxisRenderer({ axes, events, layout, filters }: AxisRendererProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const initializedRef = useRef(false);
   const axisMap = useMemo(() => new Map(axes.map((axis) => [axis.id, axis])), [axes]);
   const filterKey = [...filters].sort((a, b) => a - b).join(',');
 
@@ -39,6 +40,7 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
         pathData: string,
         color: string,
         seed: number,
+        axisId: number,
         options: { width?: number; opacity?: number; dashed?: boolean; roughness?: number } = {},
       ) => {
         if (!pathData) return;
@@ -54,6 +56,7 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
         });
         group.setAttribute('opacity', String(options.opacity ?? 0.88));
         group.setAttribute('aria-hidden', 'true');
+        group.setAttribute('data-axis-id', String(axisId));
         svg.appendChild(group);
         renderedPaths.push(...Array.from(group.querySelectorAll('path')));
       };
@@ -92,6 +95,7 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
             ]),
             axis.color,
             axis.id * 101 + index + 1,
+            axis.id,
             {
               dashed: filteredOut || silent,
               opacity: filteredOut ? 0.2 : silent ? (primary ? 0.62 : 0.52) : (primary ? 0.96 : 0.9),
@@ -112,6 +116,7 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
               ]),
               axis.color,
               axis.id * 1009,
+              axis.id,
               { width: 2.7, opacity: filteredOut ? 0.18 : 0.78 },
             );
           }
@@ -128,6 +133,7 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
             ]),
             axis.color,
             axis.id * 2017,
+            axis.id,
             { width: 2.6, opacity: filteredOut ? 0.16 : mergeX ? 0.72 : 0.42 },
           );
         }
@@ -154,11 +160,12 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
           ),
           event.color || first.axis.color,
           event.id * 3037,
+          first.axis.id,
           { width: 2.2, opacity: 0.62, roughness: 1.6 },
         );
       });
 
-      if (!reducedMotion && renderedPaths.length > 0) {
+      if (!initializedRef.current && !reducedMotion && renderedPaths.length > 0) {
         renderedPaths.forEach((path) => {
           const length = path.getTotalLength();
           gsap.set(path, { strokeDasharray: length, strokeDashoffset: length });
@@ -171,6 +178,7 @@ export default function AxisRenderer({ axes, events, layout, filters }: AxisRend
           clearProps: 'strokeDasharray,strokeDashoffset',
         });
       }
+      initializedRef.current = true;
     },
     {
       scope: svgRef,

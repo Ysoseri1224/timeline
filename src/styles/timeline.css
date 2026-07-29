@@ -11,11 +11,11 @@
   font-family: 'Instrument Serif', 'Noto Serif SC', serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  --paper-fallback: oklch(0.96 0.01 80);
   --paper: oklch(0.96 0.01 80);
   --ink: oklch(0.25 0.02 260);
   --ink-soft: color-mix(in oklch, var(--ink) 62%, var(--paper));
   --ink-faint: color-mix(in oklch, var(--ink) 34%, var(--paper));
-  --noise-opacity: 0.105;
   --paper-raised: color-mix(in oklch, var(--paper) 94%, white);
   --paper-shadow: rgba(54, 41, 26, 0.12);
   --premium-ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -26,15 +26,16 @@
 }
 
 html {
-  background: var(--paper);
+  background: var(--paper-fallback);
   scroll-behavior: auto;
+  overscroll-behavior-y: none;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: var(--paper);
+  background: var(--paper-fallback);
   color: var(--ink);
 }
 
@@ -63,57 +64,62 @@ select:focus-visible {
 }
 
 .timeline-page {
-  --age-progress: 0;
   position: relative;
   min-height: 100vh;
   overflow: clip;
   isolation: isolate;
-  background:
-    radial-gradient(ellipse at 16% 4%, color-mix(in oklch, white 34%, transparent), transparent 34%),
-    radial-gradient(ellipse at 84% 45%, rgba(118, 81, 40, 0.055), transparent 39%),
-    radial-gradient(ellipse at 28% 72%, rgba(151, 112, 64, 0.04), transparent 32%),
-    radial-gradient(ellipse at 74% 92%, rgba(86, 66, 43, 0.035), transparent 31%),
-    var(--paper);
+  background: var(--paper-fallback);
   color: var(--ink);
-  transition: background-color 80ms linear;
 }
 
-.timeline-page::before {
-  content: '';
-  position: fixed;
-  inset: -10%;
+.paper-surface {
+  position: absolute;
+  inset: 0;
   z-index: 0;
+  overflow: hidden;
+  background: var(--paper-fallback);
+  pointer-events: none;
+}
+
+.paper-surface__layer,
+.paper-surface__tone,
+.paper-surface__pulp,
+.paper-surface__texture {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.paper-surface__layer {
+  opacity: 1;
+}
+
+.paper-surface__tone {
+  background-color: var(--paper-fallback);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+.paper-surface__pulp {
   background:
-    radial-gradient(circle, rgba(73, 54, 35, 0.2) 0 0.5px, transparent 0.86px) 0 0 / 5px 7px,
-    radial-gradient(circle, rgba(132, 101, 61, 0.145) 0 0.62px, transparent 1.08px) 2px 3px / 11px 13px,
-    repeating-linear-gradient(4deg, transparent 0 17px, rgba(102, 77, 48, 0.07) 17.5px, transparent 18.2px 35px),
-    repeating-linear-gradient(94deg, transparent 0 43px, rgba(255, 255, 255, 0.14) 43.5px, transparent 44px 83px);
-  opacity: calc(0.38 + var(--age-progress) * 0.11);
-  mix-blend-mode: multiply;
-  transform: rotate(-0.18deg);
-  pointer-events: none;
+    radial-gradient(ellipse at 16% 4%, rgba(255, 255, 255, 0.32), transparent 34%),
+    radial-gradient(ellipse at 84% 45%, rgba(118, 81, 40, 0.062), transparent 39%),
+    radial-gradient(ellipse at 28% 72%, rgba(151, 112, 64, 0.052), transparent 32%),
+    radial-gradient(ellipse at 74% 92%, rgba(86, 66, 43, 0.046), transparent 31%),
+    repeating-radial-gradient(ellipse at 38% 31%, transparent 0 46px, rgba(116, 84, 47, 0.016) 48px 49px, transparent 52px 108px);
 }
 
-.paper-noise {
-  position: fixed;
-  inset: -12%;
-  z-index: 40;
-  width: 124%;
-  height: 124%;
-  opacity: var(--noise-opacity);
-  mix-blend-mode: multiply;
-  filter: contrast(1.62);
-  pointer-events: none;
-}
-
-.paper-noise__grain {
-  fill: #6f5538;
-  opacity: 0.86;
-}
-
-.paper-noise__fibers {
-  fill: #8b6a42;
-  opacity: 0.64;
+.paper-surface__texture {
+  background-image:
+    url('/timeline/textures/paper-grain.svg'),
+    url('/timeline/textures/paper-fibers.svg');
+  background-position: 0 0, 37px 19px;
+  background-repeat: repeat;
+  background-size: 192px 192px, 384px 256px;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  mask-size: 100% 100%;
 }
 
 .back-link {
@@ -194,6 +200,19 @@ select:focus-visible {
   transform: rotate(-1.2deg) skewX(-12deg);
 }
 
+.timeline-stage-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.timeline-stage-outgoing {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: visible;
+  pointer-events: none;
+}
+
 .timeline-stage {
   position: relative;
   z-index: 1;
@@ -202,6 +221,11 @@ select:focus-visible {
   margin: 0 auto;
   perspective: 1000px;
   transform-style: preserve-3d;
+}
+
+.timeline-stage--snapshot {
+  pointer-events: none;
+  user-select: none;
 }
 
 .axis-layer,
