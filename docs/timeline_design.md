@@ -72,8 +72,8 @@
 
 | 位置 | opacity |
 |------|---------|
-| 顶部 | 0.025 |
-| 底部 | 0.06 |
+| 顶部 | 0.105 |
+| 底部 | 0.145 |
 
 #### 其他颜色
 
@@ -117,13 +117,18 @@
 
 #### 轴间距
 
-`(视口宽度 - 左右边距) / 当前活跃轴数量`，自动分配。轴数变化时 GSAP 动画过渡。
+- “我们”通过 `is_primary` 标记为唯一主轴，始终固定在画面几何中心，不随列表位置偏离中央
+- 主轴是左右次轴的顺序分界：排序在主轴前的轴分布在左半页，排序在主轴后的轴分布在右半页
+- 每一侧都在页边距与主轴之间均匀分布；轴数或顺序变化时 GSAP 平滑过渡
+- 主轴线宽 `5.2px`，普通轴线宽 `3.6px`，筛选弱化时同步变细
+- 编辑器中的次轴整行都是拖拽热区，可跨过主轴调整左右位置；右侧“拖”保留为视觉提示和键盘焦点，并支持上下方向键排序。主轴本身固定且不可拖动
 
 #### 轴的生命周期
 
 - 轴可以在某段时间出现/消失（如"异地"轴只在异地期间存在）
 - 沉默的轴（当前时间段无事件）变为虚线
 - 轴的出现/消失有 GSAP 动画过渡
+- 唯一主轴贯穿完整时间轴，不允许设置分支来源、出现日期、结束日期或合流目标，也不能删除
 
 #### 分支与合流
 
@@ -151,7 +156,9 @@
 #### 节点位置
 
 - 贴在轴线上，从轴侧边伸出
-- 属于某条轴的节点挂在该轴上
+- 一个节点包含主轴 tag 时优先挂在主轴上；需要侧挂的主轴节点按日期倒序后的序号严格右/左交替，事件 ID、次轴事件和全宽里程碑均不影响交替
+- 不包含主轴的节点挂在其最靠前的所属轴上
+- 新建节点默认勾选唯一主轴（当前为“我们”），仍可手动增删其他 tag
 
 #### 节点交互：3D 浮层
 
@@ -242,6 +249,7 @@ box-shadow: 0 8px 24px rgba(44,36,22,0.10);
 - 新增：选择轴（可多选 = 跨轴）+ 填标题/日期/描述 + 拖拽上传媒体
 - 编辑：原地弹出浮层修改
 - 新建轴：命名 + 选颜色
+- 轴管理：列表从上到下对应纸面从左到右；按住次轴任意位置拖动，或在“拖”按钮上使用上下方向键调整顺序，跨过“我们”即可换到主轴另一侧。普通点击仍用于选中编辑
 - 未登录时纯展示，编辑控件不渲染
 
 ---
@@ -267,7 +275,8 @@ box-shadow: 0 8px 24px rgba(44,36,22,0.10);
 ### 4.3 交互行为
 
 - 平时半透明安静待命，hover 时完全不透明
-- **可拖动**：拖拽改变位置，防止遮盖内容，记住位置（localStorage）
+- **固定位置**：托盘固定在页面底部居中，不提供拖拽把手，也不读取或保存位置到 localStorage
+- 移动端托盘内容可横向滚动，纸面末尾预留安全区，避免末尾节点被遮挡
 - 独立于 luckyrong 主站导航
 
 ---
@@ -425,29 +434,43 @@ gsap.to(node, { scale: 1.01, boxShadow: '0 4px 12px rgba(44,36,22,0.08)', durati
 ```sql
 CREATE TABLE timeline_axes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
+  name TEXT NOT NULL UNIQUE,
   color TEXT NOT NULL,
-  sort_order INTEGER DEFAULT 0,
-  created_at TEXT DEFAULT (datetime('now'))
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  parent_axis_id INTEGER REFERENCES timeline_axes(id) ON DELETE SET NULL,
+  start_date TEXT,
+  end_date TEXT,
+  merge_axis_id INTEGER REFERENCES timeline_axes(id) ON DELETE SET NULL,
+  is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE UNIQUE INDEX idx_timeline_axes_one_primary
+ON timeline_axes(is_primary) WHERE is_primary = 1;
 
 CREATE TABLE timeline_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL CHECK(type IN ('text','photo','video','milestone')),
   title TEXT NOT NULL,
+  subtitle TEXT,
   description TEXT,
   event_date TEXT NOT NULL,
-  media TEXT,  -- JSON: [{url, type, caption}]
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
+  color TEXT,
+  media TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE timeline_event_axes (
   event_id INTEGER NOT NULL REFERENCES timeline_events(id) ON DELETE CASCADE,
-  axis_id INTEGER NOT NULL REFERENCES timeline_axes(id) ON DELETE CASCADE,
+  axis_id INTEGER NOT NULL REFERENCES timeline_axes(id) ON DELETE RESTRICT,
   PRIMARY KEY (event_id, axis_id)
 );
 ```
+
+- migration `0002_primary_axis_and_order.sql` 将“我们”升级为唯一主轴，并把既有 `sort_order` 归一化为连续的 `0..n-1`
+- 轴顺序必须整组提交，Worker 使用 D1 `batch()` 原子更新全部轴，避免局部失败留下重复或断裂顺序
 
 ### 8.3 API 路由
 
@@ -455,6 +478,7 @@ CREATE TABLE timeline_event_axes (
 |------|------|------|------|
 | GET | /timeline/api/axes | 获取所有轴 | 无 |
 | POST | /timeline/api/axes | 新建轴 | JWT |
+| PUT | /timeline/api/axes/order | 原子保存全部轴的画面顺序 | JWT |
 | PUT | /timeline/api/axes/:id | 编辑轴 | JWT |
 | DELETE | /timeline/api/axes/:id | 删除轴 | JWT |
 | GET | /timeline/api/events | 获取事件（分页，按日期倒序） | 无 |
@@ -462,7 +486,9 @@ CREATE TABLE timeline_event_axes (
 | PUT | /timeline/api/events/:id | 编辑事件 | JWT |
 | DELETE | /timeline/api/events/:id | 删除事件 | JWT |
 | POST | /timeline/api/upload | 上传媒体到 R2 | JWT |
+| GET/HEAD | /timeline/api/media/:key | 读取媒体，支持 Range | 无 |
 | POST | /timeline/api/login | 验证密码，签发 JWT | 无 |
+| GET | /timeline/api/session | 验证现有 JWT | JWT |
 
 ### 8.4 认证流程
 
@@ -472,7 +498,7 @@ CREATE TABLE timeline_event_axes (
     → 有 → 直接进入编辑模式
     → 无 → 弹出密码输入框
       → 输入密码 → POST /timeline/api/login
-        → Worker 比对 env.TIMELINE_SECRET
+        → Worker 比对 env.TIMELINE_PASSWORD
           → 通过 → 签 JWT（30天有效）→ 返回前端存 localStorage
           → 失败 → 提示错误
 ```
@@ -497,30 +523,25 @@ CREATE TABLE timeline_event_axes (
 
 ---
 
-## 十、文件结构（预期）
+## 十、文件结构（当前）
 
 ```
-luckyrong/
+timeline/                              # 独立公开 GitHub 仓库与 Pages 项目
+├── migrations/                       # D1 schema 与主轴/顺序 migration
 ├── src/
-│   ├── pages/
-│   │   └── timeline.astro          # 页面入口，加载 React island
-│   ├── components/
-│   │   └── timeline/
-│   │       ├── TimelineApp.tsx      # React island 根组件
-│   │       ├── AxisRenderer.tsx     # 轴线渲染（Rough.js + d3）
-│   │       ├── NodeCard.tsx         # 节点卡片（文字/照片/视频）
-│   │       ├── Milestone.tsx        # 里程碑全宽组件
-│   │       ├── NodeDetail.tsx       # 节点浮层（3D 展开）
-│   │       ├── Toolbar.tsx          # 浮动工具托盘
-│   │       ├── YearNav.tsx          # 年份锚点
-│   │       ├── FilterChips.tsx      # 筛选 chips
-│   │       ├── EditPanel.tsx        # 编辑浮层（登录态）
-│   │       └── LoginPrompt.tsx      # 密码输入框
-│   └── styles/
-│       └── timeline.css             # timeline 独立样式（色温变量、纸张纹理）
-├── public/
-│   └── fonts/                       # 已有 Instrument Serif woff2
-└── package.json                     # gsap, roughjs, d3-shape, glightbox
+│   ├── pages/index.astro             # 页面入口，base=/timeline
+│   ├── components/timeline/          # React UI、布局、API、排序与测试
+│   └── styles/timeline.css           # 色温变量、纸张纹理与组件样式
+├── public/fonts/                     # Instrument Serif 自托管字体
+├── public/textures/                  # 预加载、可平铺的纸张颗粒与纤维
+├── wrangler.jsonc                    # Cloudflare Pages 配置
+├── wrangler.d1.jsonc                 # 独立 D1 migration 配置
+└── package.json
+
+luckyrong/
+└── workers/
+    ├── router.js                     # /timeline 页面与 API 路由
+    └── timeline-api.js               # D1/R2 CRUD、认证与顺序保存
 ```
 
 ---
@@ -654,10 +675,11 @@ luckyrong/
 
 ---
 
-## 十三、待确认项
+## 十三、确认状态
 
-- [ ] R2 bucket 名称
-- [ ] 轴的初始分类和命名（我们/我/她 之外的事轴具体有哪些）
-- [ ] 轴颜色具体值（实现时看整体效果确定）
+- [x] R2 bucket：`timeline-media`，Worker 绑定 `TIMELINE_MEDIA`
+- [x] 初始轴：我们 / 我 / 她 / 旅行 / 日常 / 里程碑 / 异地
+- [x] 初始轴色已写入 `0001_init.sql`，后续可在轴管理中自定义
 - [ ] 里程碑节点的具体视觉样式微调
-- [ ] 托盘工具栏的精确视觉设计（圆角大小、毛玻璃参数）
+- [x] 托盘采用固定底部居中的毛玻璃圆角条，不可拖动
+- [x] “我们”为唯一主轴：固定居中、加粗、不可删除或设置生命周期
