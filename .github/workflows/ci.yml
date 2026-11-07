@@ -34,21 +34,14 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm ci --replace-registry-host=always --registry=https://registry.npmjs.org/ && npm run build > /dev/null
-      - name: Wait for the deployed service worker to match this build
+      - name: Wait for Pages to publish this commit
         run: |
-          want=$(grep -o "const VERSION = '[0-9a-f]*'" dist/sw.js)
-          echo "expect: $want"
           for i in $(seq 1 40); do
-            got=$(curl -sS --max-time 15 "https://luckyrong.ysoseri.us/timeline/sw.js?t=$(date +%s)" | grep -o "const VERSION = '[0-9a-f]*'" || true)
-            if [ "$got" = "$want" ]; then echo "live: $got"; break; fi
+            got=$(curl -sS --max-time 15 "https://luckyrong.ysoseri.us/timeline/sw.js?t=$(date +%s)" | head -n1 || true)
+            if [ "$got" = "// build $GITHUB_SHA" ]; then echo "live: $got"; break; fi
             echo "live: ${got:-none}, waiting…"; sleep 15
           done
-          [ "$got" = "$want" ]
+          [ "$got" = "// build $GITHUB_SHA" ]
       - name: Offline files reachable
         run: |
           B=https://luckyrong.ysoseri.us/timeline
