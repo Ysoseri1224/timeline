@@ -36,6 +36,8 @@ export interface TimelineEvent {
   axis_ids: number[];
   created_at?: string;
   updated_at?: string;
+  /** set on the page for edits that are saved on this device but not yet on the server */
+  pending?: 'create' | 'update' | 'delete';
 }
 
 export interface EventDraft {

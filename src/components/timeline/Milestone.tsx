@@ -46,6 +46,7 @@ export default function Milestone({
       className={`timeline-event milestone${dimmed ? ' is-dimmed' : ''}`}
       data-event-id={event.id}
       data-y={event.y}
+      data-pending={event.pending}
       style={
         {
           transform: `translate3d(0, ${event.y}px, 0)`,

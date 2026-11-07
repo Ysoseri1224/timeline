@@ -1,17 +1,35 @@
 import type { AxisDraft, EventDraft, TimelineAxis, TimelineEvent, TimelineMedia } from './types';
 
-const API_BASE = import.meta.env.PUBLIC_TIMELINE_API_BASE || '/timeline/api';
+export const API_BASE = import.meta.env.PUBLIC_TIMELINE_API_BASE || '/timeline/api';
+const REQUEST_TIMEOUT_MS = 20_000;
 const TOKEN_KEY = 'timeline-editor-token';
 
 type ApiOptions = RequestInit & { authenticated?: boolean };
 
+/** status 0 = no usable network (offline, timeout, or a captive-portal page instead of the API). */
 export class ApiError extends Error {
   status: number;
+  payload: Record<string, unknown> | null;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, payload: Record<string, unknown> | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.payload = payload;
+  }
+}
+
+export const isNetworkError = (error: unknown) => error instanceof ApiError && error.status === 0;
+
+/** Expiry (unix seconds) read from the stored editor token, without contacting the server. */
+export function tokenExpiry(): number | null {
+  const token = getStoredToken();
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: number };
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
   }
 }
 
@@ -26,7 +44,7 @@ export function storeToken(token: string | null): void {
   else window.localStorage.removeItem(TOKEN_KEY);
 }
 
-async function apiFetch<T>(path: string, options: ApiOptions = {}): Promise<T> {
+export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const token = options.authenticated ? getStoredToken() : null;
   if (token) headers.set('Authorization', `Bearer ${token}`);
@@ -34,15 +52,25 @@ async function apiFetch<T>(path: string, options: ApiOptions = {}): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  const contentType = response.headers.get('content-type') ?? '';
-  const payload = contentType.includes('application/json')
-    ? ((await response.json()) as { error?: string } & T)
-    : null;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response: Response;
+  let payload: ({ error?: string } & T) | null = null;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: controller.signal, cache: 'no-store' });
+    const contentType = response.headers.get('content-type') ?? '';
+    // Anything that is not our JSON (e.g. an airport Wi-Fi login page) counts as "no network".
+    if (!contentType.includes('application/json')) throw new Error('not json');
+    payload = (await response.json()) as { error?: string } & T;
+  } catch {
+    throw new ApiError('网络不可用', 0);
+  } finally {
+    window.clearTimeout(timer);
+  }
 
   if (!response.ok) {
     if (response.status === 401 && options.authenticated) storeToken(null);
-    throw new ApiError(payload?.error || `请求失败（${response.status}）`, response.status);
+    throw new ApiError(payload?.error || `请求失败（${response.status}）`, response.status, payload as Record<string, unknown>);
   }
   return payload as T;
 }
@@ -76,12 +104,17 @@ export async function login(password: string): Promise<string> {
   return response.token;
 }
 
+/** Offline, an unexpired stored token still counts: editing then goes to the local outbox. */
 export async function verifySession(): Promise<boolean> {
   if (!getStoredToken()) return false;
   try {
     await apiFetch<{ ok: true }>('/session', { authenticated: true });
     return true;
-  } catch {
+  } catch (error) {
+    if (isNetworkError(error)) {
+      const exp = tokenExpiry();
+      return exp !== null && exp * 1000 > Date.now();
+    }
     storeToken(null);
     return false;
   }
@@ -112,7 +145,7 @@ export const updateEvent = (id: number, draft: EventDraft): Promise<{ event: Tim
 export const deleteEvent = (id: number): Promise<{ ok: true }> =>
   apiFetch(`/events/${id}`, { method: 'DELETE', authenticated: true });
 
-export async function uploadMedia(file: File, onProgress?: (progress: number) => void): Promise<TimelineMedia> {
+export async function uploadMedia(file: Blob & { name?: string }, onProgress?: (progress: number) => void, uploadId?: string): Promise<TimelineMedia> {
   const token = getStoredToken();
   if (!token) throw new ApiError('请先验证编辑密码', 401);
 
@@ -120,7 +153,9 @@ export async function uploadMedia(file: File, onProgress?: (progress: number) =>
     const request = new XMLHttpRequest();
     request.open('POST', `${API_BASE}/upload`);
     request.setRequestHeader('Authorization', `Bearer ${token}`);
-    request.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+    request.setRequestHeader('X-Filename', encodeURIComponent(file.name || 'image'));
+    if (uploadId) request.setRequestHeader('X-Upload-Id', uploadId);
+    request.timeout = 180_000;
     request.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
     request.upload.addEventListener('progress', (event) => {
       if (event.lengthComputable) onProgress?.(event.loaded / event.total);
@@ -130,13 +165,15 @@ export async function uploadMedia(file: File, onProgress?: (progress: number) =>
       try {
         payload = JSON.parse(request.responseText) as typeof payload;
       } catch {
-        reject(new ApiError('上传响应格式无效', request.status));
+        reject(new ApiError('网络不可用', 0));
         return;
       }
+      if (request.status === 401) storeToken(null);
       if (request.status >= 200 && request.status < 300 && payload.media) resolve(payload.media);
       else reject(new ApiError(payload.error || '媒体上传失败', request.status));
     });
     request.addEventListener('error', () => reject(new ApiError('媒体上传网络错误', 0)));
+    request.addEventListener('timeout', () => reject(new ApiError('媒体上传超时', 0)));
     request.send(file);
   });
 }

@@ -11,21 +11,29 @@ import NodeDetail from './NodeDetail';
 import PaperSurface from './PaperSurface';
 import Toolbar from './Toolbar';
 import YearNav from './YearNav';
+import { ConflictDialog, OfflineBar, OfflineButton, OfflinePanel } from './OfflineUI';
+import type { OfflineState } from './OfflineUI';
 import {
   createAxis,
-  createEvent,
   deleteAxis,
-  deleteEvent,
   fetchAllEvents,
   fetchAxes,
+  getStoredToken,
+  isNetworkError,
   login,
   reorderAxes as persistAxisOrder,
   storeToken,
   updateAxis,
-  updateEvent,
   uploadMedia,
   verifySession,
 } from './api';
+import { applyOutbox, enqueue, loadOps, loadSnapshot, saveSnapshot, storeLocalImage } from './offline/outbox';
+import type { OutboxOp } from './offline/outbox';
+import { loadReport, prepareOffline, storageEstimate } from './offline/prepare';
+import type { PrepareReport } from './offline/prepare';
+import { resolveConflict, runSync } from './offline/sync';
+import type { Resolution, SyncOutcome } from './offline/sync';
+import { deliverFile, exportBackup, importBackup } from './offline/backup';
 import { computeTimelineLayout } from './layout';
 import {
   buildPaperSurface,
@@ -97,6 +105,18 @@ export default function TimelineApp() {
   const [activeYear, setActiveYear] = useState<number | null>(null);
   const [stageOffset, setStageOffset] = useState<number | null>(null);
   const [transition, setTransition] = useState<VisualTransitionState | null>(null);
+  // offline: serverRef = last known server data, opsRef = local outbox; the page shows both combined
+  const serverRef = useRef<{ axes: TimelineAxis[]; events: TimelineEvent[] }>({ axes: [], events: [] });
+  const opsRef = useRef<OutboxOp[]>([]);
+  const hasData = useRef(false);
+  const localTried = useRef(false);
+  const [offline, setOffline] = useState<OfflineState>({ net: 'unknown', ops: [], syncing: null, authExpired: false, snapshotAt: null, swUpdated: false });
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [conflictOp, setConflictOp] = useState<OutboxOp | null>(null);
+  const [report, setReport] = useState<PrepareReport | null>(null);
+  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
+  const [preparing, setPreparing] = useState<{ label: string; done: number; total: number } | null>(null);
+  const patchOffline = useCallback((patch: Partial<OfflineState>) => setOffline((current) => ({ ...current, ...patch })), []);
 
   const layout = useMemo(() => computeTimelineLayout(axes, events, mode), [axes, events, mode]);
   const years = useMemo(() => layout.years.map((item) => item.year), [layout.years]);
@@ -181,32 +201,185 @@ export default function TimelineApp() {
     setMode(nextMode);
   }, []);
 
+  const showData = useCallback((nextAxes: TimelineAxis[], serverEvents: TimelineEvent[], ops: OutboxOp[]) => {
+    const display = applyOutbox(serverEvents, ops);
+    const current = viewRef.current;
+    hasData.current = true;
+    if (JSON.stringify(current.axes) === JSON.stringify(nextAxes) && JSON.stringify(current.events) === JSON.stringify(display)) return;
+    commitVisualState(nextAxes, display, current.mode);
+  }, [commitVisualState]);
+
+  const refreshOps = useCallback(async () => {
+    const ops = await loadOps();
+    opsRef.current = ops;
+    patchOffline({ ops });
+    showData(serverRef.current.axes, serverRef.current.events, ops);
+    return ops;
+  }, [patchOffline, showData]);
+
   const loadData = useCallback(async (quiet = false) => {
     const revision = ++dataRevision.current;
-    if (!quiet) setLoading(true);
     if (!quiet) setLoadError('');
+    // the copy saved on this device comes first, so a missing network never blocks the page
+    if (!localTried.current) {
+      localTried.current = true;
+      try {
+        const [snapshot, ops] = await Promise.all([loadSnapshot(), loadOps()]);
+        opsRef.current = ops;
+        patchOffline({ ops, snapshotAt: snapshot?.savedAt ?? null });
+        if (snapshot) {
+          serverRef.current = { axes: snapshot.axes, events: snapshot.events };
+          showData(snapshot.axes, snapshot.events, ops);
+          setLoading(false);
+        }
+      } catch { /* no IndexedDB: online-only */ }
+    }
+    if (!quiet && !hasData.current) setLoading(true);
     try {
       const [nextAxes, nextEvents] = await Promise.all([fetchAxes(), fetchAllEvents()]);
       if (revision !== dataRevision.current) return false;
-      commitVisualState(nextAxes, nextEvents, viewRef.current.mode);
+      serverRef.current = { axes: nextAxes, events: nextEvents };
+      void saveSnapshot(nextAxes, nextEvents).catch(() => {});
+      patchOffline({ net: 'online', snapshotAt: Date.now() });
+      showData(nextAxes, nextEvents, opsRef.current);
       return true;
     } catch (error) {
       if (revision !== dataRevision.current) return false;
+      if (isNetworkError(error)) patchOffline({ net: 'offline' });
+      if (hasData.current) return false; // keep showing the saved copy
       if (quiet) throw error;
-      setLoadError(error instanceof Error ? error.message : '时间轴读取失败');
+      setLoadError(isNetworkError(error)
+        ? '没有网络，这台设备上也还没有保存过时间轴。联网打开一次后，就能离线翻阅。'
+        : error instanceof Error ? error.message : '时间轴读取失败');
       return false;
     } finally {
       if (revision === dataRevision.current) setLoading(false);
     }
-  }, [commitVisualState]);
+  }, [patchOffline, showData]);
+
+  const syncNow = useCallback(async (): Promise<SyncOutcome | null> => {
+    const pending = opsRef.current.filter((op) => !op.conflict).length;
+    if (pending === 0) return { kind: 'idle' };
+    if (!getStoredToken()) { patchOffline({ authExpired: true }); return null; }
+    patchOffline({ syncing: { done: 0, total: pending, label: '' } });
+    try {
+      const outcome = await runSync((progress) => patchOffline({ syncing: progress }));
+      if (outcome.kind === 'offline') patchOffline({ net: 'offline' });
+      if (outcome.kind === 'auth') { patchOffline({ authExpired: true }); setEditor(false); }
+      if (outcome.kind === 'synced') {
+        patchOffline({ net: 'online', authExpired: false });
+        const snapshot = await loadSnapshot();
+        if (snapshot) {
+          serverRef.current = { axes: snapshot.axes, events: snapshot.events };
+          patchOffline({ snapshotAt: snapshot.savedAt });
+        }
+        outcome.notes.forEach((note) => showToast(note, 'info'));
+      }
+      await refreshOps();
+      return outcome;
+    } catch (error) {
+      showToast(error instanceof Error ? `同步出错：${error.message}` : '同步出错', 'error');
+      return null;
+    } finally {
+      patchOffline({ syncing: null });
+    }
+  }, [patchOffline, refreshOps, showToast]);
+
+  const syncMessage = (outcome: SyncOutcome | null, success: string): [string, NonNullable<ToastState>['tone']] => {
+    if (!outcome || outcome.kind === 'auth') return ['已保存在本机；登录已过期，重新登录后同步', 'error'];
+    if (outcome.kind === 'offline') return ['已保存在本机，联网后自动同步', 'info'];
+    if (outcome.kind === 'synced' && outcome.conflicts > 0) return ['已保存在本机；有改动需要你选择保留哪个版本', 'error'];
+    return [success, 'success'];
+  };
 
   useEffect(() => {
-    void loadData();
+    void loadData().then(() => {
+      if (opsRef.current.some((op) => !op.conflict)) void syncNow();
+    });
     void verifySession().then(setEditor);
     return () => {
       if (toastTimer.current) window.clearTimeout(toastTimer.current);
     };
   }, [loadData]);
+
+  // reconnect: refresh data and send pending edits
+  useEffect(() => {
+    const kick = () => {
+      void loadData(true).catch(() => {});
+      if (opsRef.current.some((op) => !op.conflict)) void syncNow();
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') kick(); };
+    const onOffline = () => patchOffline({ net: 'offline' });
+    window.addEventListener('online', kick);
+    window.addEventListener('offline', onOffline);
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && opsRef.current.some((op) => !op.conflict)) void syncNow();
+    }, 30_000);
+    let hadController = false;
+    const onControllerChange = () => { if (hadController) patchOffline({ swUpdated: true }); };
+    if ('serviceWorker' in navigator) {
+      hadController = Boolean(navigator.serviceWorker.controller);
+      navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+    }
+    return () => {
+      window.removeEventListener('online', kick);
+      window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(timer);
+      if ('serviceWorker' in navigator) navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+    };
+  }, [loadData, syncNow, patchOffline]);
+
+  useEffect(() => {
+    if (!panelOpen) return;
+    void loadReport().then((r) => setReport(r ?? null)).catch(() => {});
+    void storageEstimate().then(setStorage);
+  }, [panelOpen]);
+
+  const runPrepare = async () => {
+    setPreparing({ label: '开始', done: 0, total: 1 });
+    try {
+      const result = await prepareOffline((label, done, total) => setPreparing({ label, done, total }));
+      setReport(result);
+      await loadData(true).catch(() => {});
+      showToast(result.images.failed > 0 ? `有 ${result.images.failed} 张图片没下载成功，可以再点一次` : '离线准备完成', result.images.failed > 0 ? 'error' : 'success');
+    } catch (error) {
+      showToast(isNetworkError(error) ? '离线准备需要联网' : error instanceof Error ? error.message : '离线准备失败', 'error');
+    } finally {
+      setPreparing(null);
+      setStorage(await storageEstimate());
+    }
+  };
+
+  const runExport = async () => {
+    try {
+      const { file, ops, images } = await exportBackup();
+      await deliverFile(file);
+      showToast(`已导出 ${ops} 条改动、${images} 张图片`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      showToast(error instanceof Error ? error.message : '导出失败', 'error');
+    }
+  };
+
+  const runImport = async (file: File) => {
+    try {
+      const added = await importBackup(file);
+      await refreshOps();
+      showToast(added ? `导入了 ${added} 条改动` : '这些改动本机已经有了', 'info');
+      if (added) void syncNow();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '导入失败', 'error');
+    }
+  };
+
+  const resolve = async (op: OutboxOp, choice: Resolution, axisIds?: number[]) => {
+    await resolveConflict(op, choice, axisIds);
+    setConflictOp(null);
+    await refreshOps();
+    void syncNow();
+  };
 
   useLayoutEffect(() => {
     const stage = stageRef.current;
@@ -224,7 +397,7 @@ export default function TimelineApp() {
       observer.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [loading]);
+  }, [loading, offline]); // the offline bar adds top padding
 
   useLayoutEffect(() => {
     if (!transition) return;
@@ -395,7 +568,9 @@ export default function TimelineApp() {
       await login(password);
       setEditor(true);
       setLoginOpen(false);
+      patchOffline({ authExpired: false });
       showToast('编辑状态已开启');
+      void syncNow();
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : '密码验证失败');
     } finally {
@@ -403,20 +578,23 @@ export default function TimelineApp() {
     }
   };
 
+  // Edits are committed to this device first, then sent; the network only decides when.
   const saveEvent = async (draft: EventDraft, eventId: number | null) => {
     setSaving(true);
     try {
-      if (eventId) await updateEvent(eventId, draft);
-      else await createEvent(draft);
-      await loadData(true);
+      const current = eventId ? viewRef.current.events.find((item) => item.id === eventId) ?? null : null;
+      const serverVersion = eventId ? serverRef.current.events.find((item) => item.id === eventId) ?? null : null;
+      await enqueue(eventId ? 'update' : 'create', current, serverVersion, draft);
+      await refreshOps();
       setEditPanel(null);
-      showToast(eventId ? '这一页已经改好' : '新的一页已经写下');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : '保存失败', 'error');
+      showToast(error instanceof Error ? `没能存到本机：${error.message}` : '保存失败', 'error');
       throw error;
     } finally {
       setSaving(false);
     }
+    const [message, tone] = syncMessage(await syncNow(), eventId ? '这一页已经改好' : '新的一页已经写下');
+    showToast(message, tone);
   };
 
   const saveAxis = async (draft: AxisDraft, axisId: number | null) => {
@@ -438,6 +616,7 @@ export default function TimelineApp() {
     setSaving(true);
     try {
       const response = await persistAxisOrder(axisIds);
+      serverRef.current = { ...serverRef.current, axes: response.axes };
       commitVisualState(response.axes, viewRef.current.events, viewRef.current.mode);
       showToast('线条顺序已经整理好');
     } catch (error) {
@@ -469,17 +648,17 @@ export default function TimelineApp() {
 
   const removeEvent = async (event: TimelineEvent) => {
     if (!window.confirm(`删除“${event.title}”？关联媒体也会从存储中移除。`)) return;
-    setSaving(true);
     try {
-      await deleteEvent(event.id);
+      const serverVersion = serverRef.current.events.find((item) => item.id === event.id) ?? null;
+      await enqueue('delete', event, serverVersion, null);
       setDetail(null);
-      await loadData(true);
-      showToast('这一页已从日记中移除');
+      await refreshOps();
     } catch (error) {
       showToast(error instanceof Error ? error.message : '删除失败', 'error');
-    } finally {
-      setSaving(false);
+      return;
     }
+    const [message, tone] = syncMessage(await syncNow(), '这一页已从日记中移除');
+    showToast(message, tone);
   };
 
   const openEditor = () => {
@@ -587,9 +766,17 @@ export default function TimelineApp() {
             onModeChange={changeMode}
             onYearJump={jumpToYear}
             onLogin={() => { setLoginError(''); setLoginOpen(true); }}
-            onLogout={() => { storeToken(null); setEditor(false); setEditPanel(null); showToast('已退出编辑状态', 'info'); }}
+            onLogout={() => {
+              const pending = opsRef.current.length;
+              if (pending && !window.confirm(`还有 ${pending} 条改动没同步。退出后要重新登录才能同步，确定退出？`)) return;
+              storeToken(null); setEditor(false); setEditPanel(null); showToast('已退出编辑状态', 'info');
+            }}
             onNewEvent={() => setEditPanel({ kind: 'event', event: null })}
-            onManageAxes={() => setEditPanel({ kind: 'axes', event: null })}
+            onManageAxes={() => {
+              if (offline.net === 'offline') { showToast('管理轴需要联网；记录可以离线写', 'info'); return; }
+              setEditPanel({ kind: 'axes', event: null });
+            }}
+            offlineSlot={<OfflineButton state={offline} onOpen={() => setPanelOpen(true)} />}
           />
           <YearNav years={years} activeYear={activeYear} onJump={jumpToYear} />
         </>
@@ -617,9 +804,37 @@ export default function TimelineApp() {
           onSaveAxis={saveAxis}
           onReorderAxes={saveAxisOrder}
           onDeleteAxis={removeAxis}
-          onUpload={(file: File, onProgress: (progress: number) => void): Promise<TimelineMedia> => uploadMedia(file, onProgress)}
+          onUpload={(file: File, onProgress: (progress: number) => void): Promise<TimelineMedia> => {
+            // images wait on this device and go up with the sync; videos still need the network
+            if (file.type.startsWith('image/')) return storeLocalImage(file);
+            if (offline.net === 'offline') return Promise.reject(new Error('视频需要联网后再上传，文字和图片可以先保存'));
+            return uploadMedia(file, onProgress);
+          }}
         />
       )}
+      <OfflineBar state={offline} onOpen={() => {
+        const conflict = offline.ops.find((op) => op.conflict);
+        if (conflict) setConflictOp(conflict);
+        else if (offline.authExpired) { setLoginError(''); setLoginOpen(true); }
+        else setPanelOpen(true);
+      }} />
+      {panelOpen && (
+        <OfflinePanel
+          state={offline}
+          editor={editor}
+          report={report}
+          storage={storage}
+          preparing={preparing}
+          onClose={() => setPanelOpen(false)}
+          onSync={() => void syncNow()}
+          onPrepare={() => void runPrepare()}
+          onExport={() => void runExport()}
+          onImport={(file) => void runImport(file)}
+          onLogin={() => { setPanelOpen(false); setLoginError(''); setLoginOpen(true); }}
+          onOpenConflict={(op) => { setPanelOpen(false); setConflictOp(op); }}
+        />
+      )}
+      {conflictOp && <ConflictDialog op={conflictOp} axes={axes} onResolve={(op, choice, ids) => void resolve(op, choice, ids)} onClose={() => setConflictOp(null)} />}
       {toast && <Toast key={`${toast.tone}-${toast.message}`} toast={toast} />}
     </main>
   );

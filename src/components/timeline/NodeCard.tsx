@@ -57,6 +57,7 @@ export default function NodeCard({
       className={`timeline-event timeline-event--${event.side}${selected ? ' is-selected' : ''}${dimmed ? ' is-dimmed' : ''}`}
       data-event-id={event.id}
       data-y={event.y}
+      data-pending={event.pending}
       style={
         {
           left: `${(event.x / 1200) * 100}%`,

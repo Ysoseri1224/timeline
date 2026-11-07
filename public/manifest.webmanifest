@@ -1,0 +1,16 @@
+{
+  "name": "我们的时间轴",
+  "short_name": "时间轴",
+  "id": "/timeline/",
+  "start_url": "/timeline/",
+  "scope": "/timeline/",
+  "display": "standalone",
+  "background_color": "#f5efe3",
+  "theme_color": "#f5efe3",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "/timeline/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/timeline/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/timeline/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

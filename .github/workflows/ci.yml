@@ -1,0 +1,59 @@
+name: ci
+
+# Cloudflare Pages builds and deploys main by itself; this mirrors the build here
+# so a failing build or test is visible on GitHub.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --replace-registry-host=always --registry=https://registry.npmjs.org/
+      - run: npm test
+      - run: npm run build
+      - name: Service worker generated
+        run: |
+          test -f dist/sw.js
+          grep -o "version [0-9a-f]*" dist/sw.js || head -c 300 dist/sw.js
+          grep -c '"/timeline/' dist/sw.js
+
+  # Waits for Cloudflare Pages to publish this commit, then checks the offline files are live.
+  live:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --replace-registry-host=always --registry=https://registry.npmjs.org/ && npm run build > /dev/null
+      - name: Wait for the deployed service worker to match this build
+        run: |
+          want=$(grep -o "const VERSION = '[0-9a-f]*'" dist/sw.js)
+          echo "expect: $want"
+          for i in $(seq 1 40); do
+            got=$(curl -sS --max-time 15 "https://luckyrong.ysoseri.us/timeline/sw.js?t=$(date +%s)" | grep -o "const VERSION = '[0-9a-f]*'" || true)
+            if [ "$got" = "$want" ]; then echo "live: $got"; break; fi
+            echo "live: ${got:-none}, waiting…"; sleep 15
+          done
+          [ "$got" = "$want" ]
+      - name: Offline files reachable
+        run: |
+          B=https://luckyrong.ysoseri.us/timeline
+          for p in / manifest.webmanifest apple-touch-icon.png icon-192.png; do
+            echo "$p $(curl -sS -o /dev/null -w '%{http_code} %{content_type}' "$B/$p")"
+          done
+          curl -sS "$B/" | grep -c 'name="timeline-shell"'
+          curl -sS "$B/api/axes" | jq '.axes | length'

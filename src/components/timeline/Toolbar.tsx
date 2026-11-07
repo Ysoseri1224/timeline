@@ -15,6 +15,7 @@ interface ToolbarProps {
   onLogout: () => void;
   onNewEvent: () => void;
   onManageAxes: () => void;
+  offlineSlot?: React.ReactNode;
 }
 
 export default function Toolbar({
@@ -31,6 +32,7 @@ export default function Toolbar({
   onLogout,
   onNewEvent,
   onManageAxes,
+  offlineSlot,
 }: ToolbarProps) {
   return (
     <div className="timeline-toolbar" aria-label="时间轴工具托盘">
@@ -47,6 +49,7 @@ export default function Toolbar({
         </select>
       )}
       <span className="toolbar-separator" />
+      {offlineSlot}
       {editor ? (
         <>
           <button type="button" className="toolbar-primary" onClick={onNewEvent}>＋ 记一笔</button>

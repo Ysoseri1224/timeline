@@ -7,7 +7,8 @@ import '../styles/timeline.css';
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="timeline-shell" content="1" />
     <meta name="theme-color" content="#f5efe3" />
     <meta name="description" content="一本沿着时间向下翻阅的双人日记。" />
     <link rel="preload" href={`${import.meta.env.BASE_URL}textures/paper-pulp.svg`} as="image" type="image/svg+xml" fetchpriority="high" />
@@ -20,9 +21,22 @@ import '../styles/timeline.css';
       rel="stylesheet"
     />
     <link rel="icon" href={`${import.meta.env.BASE_URL}favicon.svg`} type="image/svg+xml" />
+    <link rel="manifest" href={`${import.meta.env.BASE_URL}manifest.webmanifest`} />
+    <link rel="apple-touch-icon" href={`${import.meta.env.BASE_URL}apple-touch-icon.png`} />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="时间轴" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>我们的时间轴</title>
   </head>
   <body>
-    <TimelineApp client:visible />
+    <TimelineApp client:load />
+    <script is:inline>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/timeline/sw.js', { scope: '/timeline/' }).catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>
